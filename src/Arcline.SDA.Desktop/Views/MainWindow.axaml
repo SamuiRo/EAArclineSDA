@@ -1,0 +1,20 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Arcline.SDA.Desktop.ViewModels"
+        xmlns:views="using:Arcline.SDA.Desktop.Views"
+        x:Class="Arcline.SDA.Desktop.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Icon="/Assets/icon.ico"
+        Title="{Binding Title}"
+        Width="900" Height="620" MinWidth="640" MinHeight="460"
+        WindowStartupLocation="CenterScreen">
+  <Window.DataTemplates>
+    <DataTemplate DataType="vm:UnlockViewModel">
+      <views:UnlockView />
+    </DataTemplate>
+    <DataTemplate DataType="vm:AccountsViewModel">
+      <views:AccountsView />
+    </DataTemplate>
+  </Window.DataTemplates>
+  <ContentControl Content="{Binding Current}" />
+</Window>

@@ -1,0 +1,12 @@
+.dotnet/
+bin/
+obj/
+.vs/
+.idea/
+*.user
+artifacts/
+# Never commit secrets
+*.maFile
+maFiles/
+vault/
+*.plain.json

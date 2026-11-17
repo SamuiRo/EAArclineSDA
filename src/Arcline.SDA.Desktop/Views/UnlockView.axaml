@@ -1,0 +1,27 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Arcline.SDA.Desktop.ViewModels"
+             x:Class="Arcline.SDA.Desktop.Views.UnlockView"
+             x:DataType="vm:UnlockViewModel">
+  <Grid HorizontalAlignment="Center" VerticalAlignment="Center" Width="420">
+    <StackPanel Spacing="12">
+      <Image Source="/Assets/icon.ico" Width="64" Height="64" HorizontalAlignment="Center" />
+      <TextBlock Text="{Binding Heading}" FontSize="22" FontWeight="SemiBold" HorizontalAlignment="Center" />
+      <TextBlock Text="{Binding Explanation}" TextWrapping="Wrap" Classes="muted" TextAlignment="Center" />
+      <TextBox x:Name="PassBox" PasswordChar="&#x2022;" Watermark="Passphrase" Text="{Binding Passphrase}" />
+      <TextBox PasswordChar="&#x2022;" Watermark="Repeat passphrase" Text="{Binding Confirm}" IsVisible="{Binding IsNew}" />
+      <TextBlock Text="{Binding Error}" Foreground="IndianRed" TextWrapping="Wrap" IsVisible="{Binding Error, Converter={x:Static ObjectConverters.IsNotNull}}" />
+      <Button Classes="accent" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" IsDefault="True"
+              Command="{Binding SubmitCommand}">
+        <Panel>
+          <TextBlock Text="Create vault" IsVisible="{Binding IsNew}" />
+          <TextBlock Text="Unlock" IsVisible="{Binding IsExisting}" />
+        </Panel>
+      </Button>
+      <Button HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" IsVisible="{Binding IsNew}"
+              Content="Moving from another PC? Restore from backup..." Command="{Binding RestoreCommand}" />
+      <ProgressBar IsIndeterminate="True" IsVisible="{Binding Busy}" />
+      <SelectableTextBlock Text="{Binding VaultDir, StringFormat='Vault: {0}'}" FontSize="11" Classes="muted" TextWrapping="Wrap" TextAlignment="Center" />
+    </StackPanel>
+  </Grid>
+</UserControl>

@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>arcline-sda</AssemblyName>
+    <RootNamespace>Arcline.SDA.Cli</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Arcline.SteamGuard\Arcline.SteamGuard.csproj" />
+  </ItemGroup>
+</Project>

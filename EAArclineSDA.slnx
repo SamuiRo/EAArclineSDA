@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Arcline.SDA.Cli/Arcline.SDA.Cli.csproj" />
+    <Project Path="src/Arcline.SDA.Desktop/Arcline.SDA.Desktop.csproj" />
+    <Project Path="src/Arcline.SteamGuard/Arcline.SteamGuard.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Arcline.SDA.Desktop.Tests/Arcline.SDA.Desktop.Tests.csproj" />
+    <Project Path="tests/Arcline.SteamGuard.Tests/Arcline.SteamGuard.Tests.csproj" />
+  </Folder>
+</Solution>

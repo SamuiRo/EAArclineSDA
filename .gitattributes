@@ -1,0 +1,5 @@
+# Same line endings on Windows and Linux checkouts.
+* text=auto eol=lf
+*.ico binary
+*.png binary
+*.zip binary
