@@ -1,47 +1,64 @@
 > **Role:** Per-version record of what changed and why · **Audience:** Anyone deciding whether to upgrade, or tracing when a behavior changed
 
-Версії рахуються за тим, що помічає споживач:
-- **patch** — невидимі зміни (документи, тести, рефакторинг);
-- **minor** — нова можливість без зміни наявної поведінки;
-- **major** — усе, що може зламати наявну інтеграцію: формат maFile чи сховища, CLI-аргументи, коди виходу, публічний API бібліотеки.
+Versions follow what a user or integrator can observe:
+- **patch** — invisible changes: docs, tests, refactors.
+- **minor** — new capability; existing behavior is unchanged.
+- **major** — anything that can break an existing setup or integration: the maFile/vault format, CLI arguments and exit codes, the public library API.
 
-Єдине джерело версії — `<Version>` у `Directory.Build.props`.
+The single source of the version is `<Version>` in `Directory.Build.props`. A release is published by pushing the matching `vX.Y.Z` tag. The section for that version below becomes the release notes.
 
-Нумерація продовжує оригінальний SDA (остання версія 1.0.15). 2.0.0 — major, бо формат сховища несумісний зі старим `manifest.json`. Старі дані переносяться імпортом.
+Numbering continues the original SDA (last release 1.0.15). 2.0.0 is a major because the storage format is incompatible with SDA's `manifest.json`; existing SDA data is migrated by importing it.
 
 ## [Unreleased]
+
+## [2.2.0] - 2026-11-17
+
+### Added
+- Ready-to-run releases: self-contained archives for Windows (`.zip`) and Linux (`.tar.gz`) with the desktop app and the CLI, plus `SHA256SUMS.txt`. No .NET installation needed. They are built by GitHub Actions when a version tag is pushed.
+- CI on Windows and Linux for every push and pull request.
+- English README (default) next to the Ukrainian one.
+- MIT license and third-party notices for Steam Desktop Authenticator, SteamAuth and bundled libraries.
+
+### Changed
+- In release builds `SteamKit2.dll` (LGPL-2.1) ships as a separate, replaceable file next to the executables.
+
+### Security
+- Repository guard: the test suite fails if a maFile, a `vault.json`, an SDA `manifest.json`, an archive, a private key or a hard-coded maFile secret would be committed.
 
 ## [2.1.0] - 2026-11-17
 
 ### Added
-- Зручна робота з підтвердженнями в GUI:
-  - чекбокс на кожній картці, «Select all» (Ctrl+A) і кнопки «Accept / Deny selected (N)»;
-  - фільтр за типом (All / Trades / Market / Other);
-  - перемикач «All accounts», що показує підтвердження всіх акаунтів одним списком з іменем акаунта на картці;
-  - дії над вибраним групуються в один запит до Steam на кожен акаунт;
-  - помилки показуються на відповідній картці.
+- Confirmations in the desktop app:
+  - a checkbox on every card, *Select all* (Ctrl+A), and *Accept / Deny selected (N)*;
+  - a type filter (All / Trades / Market / Other);
+  - an *All accounts* view that lists the confirmations of every account, with the account name on each card;
+  - selected confirmations are sent as one Steam request per account, and any error is shown on its card.
 
 ### Changed
-- Кнопки «Accept all» і «Deny all» замінено вибором і діями над вибраним. «Deny selected» для кількох підтверджень просить підтвердження.
-- Вибрані елементи, приховані фільтром, автоматично знімаються з вибору, щоб випадково не застосувати до них дію.
+- *Accept all* / *Deny all* are replaced by selection plus *Accept / Deny selected*. *Deny selected* asks for confirmation when more than one item is selected.
+- Items hidden by the filter are deselected automatically, so they can never be acted on by accident.
 
 ## [2.0.0] - 2026-11-17
 
-Перший реліз Arcline SDA — переписаного Steam Desktop Authenticator.
+First release of Arcline SDA, a rewrite of Steam Desktop Authenticator.
 
 ### Added
-- Кросплатформне ядро `Arcline.SteamGuard` (.NET 10), CLI `arcline-sda` з `--json` і GUI на Avalonia 11 для Windows і Linux.
-- Формат зашифрованого maFile `arcline-mafile` v1: AES-256-GCM, PBKDF2-SHA256 на 600k ітерацій, самодостатній файл. Специфікація: [features/MAFILE_FORMAT.md](../features/MAFILE_FORMAT.md). Еталонний дешифратор: `tools/mafile_decrypt.py`.
-- Сховище, де шифрування обов'язкове. Експорт акаунта: зашифрований окремим паролем для передачі або plaintext у форматі SDA. `decrypt` і `encrypt` працюють без сховища.
-- Переїзд між ПК: `backup` в один `.zip`, `restore` на новому ПК, `import-vault` для злиття сховищ.
-- Імпорт старої папки SDA, зашифрованої або ні, та plaintext maFile з опцією знищити оригінал.
-- Ротація refresh token, автоматичне збереження оновлених токенів, повтори HTTP-запитів із backoff, періодична синхронізація часу.
+- Cross-platform core library `Arcline.SteamGuard` (.NET 10), the `arcline-sda` CLI with `--json` output, and an Avalonia 11 desktop app for Windows and Linux.
+- Encrypted maFile format `arcline-mafile` v1: AES-256-GCM with PBKDF2-SHA256 (600k iterations), one self-contained file per account. Specification: [features/MAFILE_FORMAT.md](../features/MAFILE_FORMAT.md). Reference decryptor: `tools/mafile_decrypt.py`.
+- A vault with mandatory encryption.
+- Account export, either encrypted with a separate transfer passphrase or as SDA-compatible plaintext. `decrypt` and `encrypt` work without a vault.
+- Moving between PCs: `backup` to one `.zip`, `restore` on a new PC, `import-vault` to merge two vaults.
+- Import of an old SDA folder (encrypted or not) and of plaintext maFiles, with optional shredding of the source.
+- Refresh token rotation, persisted refreshed tokens, HTTP retries with backoff, and periodic Steam time sync.
 
 ### Fixed
-- **SDA #1111:** підтвердження трейдів не працювали після запуску Steam Trade Protection (липень 2025). Тепер popup приймається автоматично (`POST /trade/new/acknowledge`), а відмова Steam показується, а не ігнорується.
-- Оновлені токени сесії більше не губляться після перезапуску.
-- Фонова перевірка не зупиняється назавжди після першої помилки й не спамить діалогами.
+- **SDA #1111:** trade confirmations stopped working after Steam Trade Protection launched (July 2025).
+  - The one-time notice is now acknowledged automatically (`POST /trade/new/acknowledge`).
+  - Steam's refusal is now reported instead of silently ignored.
+- Refreshed session tokens are no longer lost on restart.
+- Background checking no longer stops for good after its first error, and no longer spams dialogs.
 
 ### Security
-- Немає режиму без шифрування. Паролі не приймаються аргументами командного рядка. Записи атомарні, на Linux права `600` і `700`.
-- Захист від path traversal у `vault.json` та в архівах резервних копій.
+- There is no unencrypted mode, and passphrases are never accepted as command-line arguments.
+- Writes are atomic, with owner-only permissions (`600` for files, `700` for directories) on Linux.
+- Path-traversal protection for `vault.json` entries and backup archives.

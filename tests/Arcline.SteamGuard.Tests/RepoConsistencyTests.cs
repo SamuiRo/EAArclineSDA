@@ -25,6 +25,56 @@ public partial class RepoConsistencyTests
         Assert.Contains($"## [{version}]", changelog);
     }
 
+    /// <summary>
+    /// The GitHub repo is public. Fails if anything that would be committed (tracked + untracked, not ignored)
+    /// looks like account data or a key.
+    /// </summary>
+    [Fact]
+    public void Repository_ContainsNoSecrets()
+    {
+        var root = RepoRoot();
+        var psi = new System.Diagnostics.ProcessStartInfo("git", "ls-files -co --exclude-standard -z")
+        {
+            WorkingDirectory = root,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+        };
+        string output;
+        try
+        {
+            using var p = System.Diagnostics.Process.Start(psi)!;
+            output = p.StandardOutput.ReadToEnd();
+            p.WaitForExit();
+            if (p.ExitCode != 0) return; // not a git checkout (e.g. source tarball): nothing to check
+        }
+        catch (System.ComponentModel.Win32Exception) { return; } // git not installed
+
+        var files = output.Split('\0', StringSplitOptions.RemoveEmptyEntries);
+        Assert.NotEmpty(files);
+        var forbiddenName = ForbiddenNameRegex();
+        var problems = new List<string>();
+        foreach (var f in files)
+        {
+            if (forbiddenName.IsMatch(f)) { problems.Add($"{f}: forbidden file type"); continue; }
+            var full = Path.Combine(root, f);
+            if (!File.Exists(full) || new FileInfo(full).Length > 2_000_000) continue;
+            var text = File.ReadAllText(full);
+            if (text.Contains(PrivateKeyMarker, StringComparison.Ordinal)) problems.Add($"{f}: private key");
+            // A real-looking maFile secret literal (tests generate theirs at runtime).
+            if (SecretLiteralRegex().IsMatch(text)) problems.Add($"{f}: hard-coded shared/identity secret");
+        }
+        Assert.True(problems.Count == 0, "Possible secrets in the repository:\n" + string.Join("\n", problems));
+    }
+
+    // Split so this file does not match itself.
+    private static readonly string PrivateKeyMarker = "PRIVATE " + "KEY-----";
+
+    [GeneratedRegex(@"(\.maFile$|(^|/)vault\.json$|(^|/)manifest\.json$|\.zip$|\.pfx$|\.p12$|\.pem$|(^|/)id_(rsa|ed25519)[^/]*$)", RegexOptions.IgnoreCase)]
+    private static partial Regex ForbiddenNameRegex();
+
+    [GeneratedRegex("\"(shared_secret|identity_secret)\"\\s*:\\s*\"[A-Za-z0-9+/]{26}[A-Za-z0-9+/=]{2}\"")]
+    private static partial Regex SecretLiteralRegex();
+
     [Fact]
     public void DocsIndex_ListsEveryDoc()
     {

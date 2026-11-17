@@ -1,115 +1,83 @@
 # Arcline SDA
 
-Кросплатформний (Windows і Linux) переписаний Steam Desktop Authenticator. maFiles за замовчуванням зашифровані, підтвердження трейдів працюють після липневого (2025) оновлення Steam про trade protection, ядро можна використовувати з інших програм.
+**English** · [Українська](README.uk.md)
 
-| Проєкт | Що це |
+A cross-platform (Windows and Linux) rewrite of [Steam Desktop Authenticator](https://github.com/Jessecar96/SteamDesktopAuthenticator).
+- maFiles are encrypted by default.
+- Trade confirmations work again after Steam's July 2025 Trade Protection change.
+- The core is a library your own programs can use.
+
+Current version: **2.2.0** ([CHANGELOG](docs/project/CHANGELOG.md)).
+
+> Use at your own risk. Whoever holds your maFile and its passphrase controls your Steam account. Keep the passphrase strong and the revocation code written down.
+
+## Download and run
+
+1. Open [Releases](https://github.com/SamuiRo/EAArclineSDA/releases) and download the archive for your OS:
+   - Windows: `ArclineSDA-<version>-win-x64.zip`
+   - Linux: `ArclineSDA-<version>-linux-x64.tar.gz`
+2. Optionally verify it against `SHA256SUMS.txt`.
+3. Extract it anywhere and run:
+   - **ArclineSDA**: the desktop app;
+   - **arcline-sda**: the command-line tool.
+
+You don't need to install .NET; the builds are self-contained.
+
+Notes:
+- **Windows:** SmartScreen may warn about an unsigned app. Choose *More info → Run anyway*.
+- **Linux:** the tray icon needs StatusNotifier/AppIndicator support. GNOME needs the AppIndicator extension; the app works without it.
+- **Where the vault lives:**
+  - `%APPDATA%\ArclineSDA\vault` on Windows;
+  - `~/.config/ArclineSDA/vault` on Linux;
+  - a `vault/` folder next to the executable (portable mode);
+  - wherever you point `--vault` or `$ARCLINE_SDA_VAULT`.
+
+**Coming from the old SDA:** *File → Import old SDA folder*, or `arcline-sda import-sda <folder>`. Encrypted SDA folders are supported. The old folder is not modified; delete it once you have checked the codes.
+
+## Features
+
+- **Steam Guard codes**, with time synced to Steam.
+- **Confirmations:**
+  - checkboxes, *Select all* (Ctrl+A), *Accept / Deny selected*;
+  - filter by type (trades / market / other);
+  - an *All accounts* view that lists every account's confirmations together;
+  - optional background checks and auto-confirm.
+- **Trade Protection fix ([SDA #1111](https://github.com/Jessecar96/SteamDesktopAuthenticator/issues/1111)).** Steam rejects trade confirmations until the account has accepted a one-time notice in the web UI. The old SDA ignored that rejection, so *Confirm* silently did nothing. Arcline acknowledges the notice automatically (`POST /trade/new/acknowledge`, the same request the browser popup sends, as ArchiSteamFarm does), retries once, and reports any confirmation that still fails.
+- **Encrypted by default.** There is no unencrypted mode.
+  - Every maFile is AES-256-GCM, with the key derived by PBKDF2-SHA256 at 600k iterations.
+  - Each file is self-contained, so it can be decrypted without any manifest.
+  - Writes are atomic, and files are owner-only (`600`) on Linux.
+- **Sessions that survive restarts.** Access tokens are refreshed and saved, refresh tokens rotate, and an expired session shows a "Log in again" hint instead of a stream of pop-ups.
+- **Moving between PCs:** *Back up vault* (one encrypted `.zip`) → *Restore from backup* on the new machine, or merge it into an existing vault.
+- **Exporting a single account:**
+  - encrypted with a separate transfer passphrase, or
+  - plaintext SDA-compatible JSON, for a one-off import into another tool (delete it afterwards).
+- **Adding a new authenticator** to an account, and removing one.
+
+## Security, honestly
+
+The encryption itself isn't the weak point. AES-256-GCM is not broken; an attacker can only guess your passphrase offline, and PBKDF2 makes every guess expensive. So **the passphrase is what protects you.** Use 4–5 random words or 14+ characters.
+
+The salt and KDF parameters are stored in clear text by design, as in every PBKDF2 scheme. A salt isn't a secret. They are bound to the ciphertext through GCM's authenticated data, so tampering with them is detected.
+
+What encryption does **not** protect against:
+- malware on an unlocked machine (keyloggers, memory readers);
+- a plaintext export you forgot to delete;
+- a weak passphrase.
+
+## Using maFiles in other programs
+
+| How | Use |
 |---|---|
-| `src/Arcline.SteamGuard` | Ядро (.NET 10): шифроване сховище maFiles, коди Steam Guard, підтвердження, сесії, прив'язка автентифікатора, імпорт старого SDA |
-| `src/Arcline.SDA.Desktop` | GUI на Avalonia 11 (Windows/Linux) |
-| `src/Arcline.SDA.Cli` | CLI `arcline-sda` з `--json`-виводом для скриптів та інших мов |
-| `tools/mafile_decrypt.py` | Еталонний дешифратор формату на Python |
-| `docs/features/MAFILE_FORMAT.md` | Специфікація зашифрованого maFile |
-| [`docs/`](docs/README.md) | Стан проєкту, CHANGELOG, архітектура, рішення |
+| CLI | `arcline-sda decrypt file.maFile` prints SDA-compatible JSON. No vault needed. |
+| .NET | Reference `Arcline.SteamGuard`: `MaFileVault.ReadExternalFile(path, passphrase)` |
+| Python | `tools/mafile_decrypt.py` (`pip install cryptography`) |
+| Any language | Follow the spec in [docs/features/MAFILE_FORMAT.md](docs/features/MAFILE_FORMAT.md): PBKDF2-SHA256 + AES-256-GCM, standard primitives only. |
 
-Поточна версія: **2.1.0** (див. [CHANGELOG](docs/project/CHANGELOG.md)).
-
-## Що було не так зі старим SDA (аналіз)
-
-**Підтвердження (issue #1111).** Після запуску Steam Trade Protection (липень 2025) Steam відмовляє в підтвердженні трейдів, доки акаунт один раз не прийняв popup про захист. SDA ігнорував відповідь `success:false` (результат `AcceptConfirmation` ніде не перевірявся), тому кнопка Confirm мовчки нічого не робила. `TradePopupForm` взагалі не чекав `await`.
-
-**Шифрування.** Сіль і IV лежали не у файлі, а в `manifest.json`, тож окремий maFile не можна було розшифрувати в іншій програмі. До того ж PBKDF2-SHA1 на 50k ітерацій і AES-CBC без автентифікації. Шифрування за замовчуванням було вимкнене (кнопка «Cancel» = plaintext), імпорт у зашифроване сховище був заблокований, а пароль передавався аргументом `-k` і світився у списку процесів.
-
-**Сесії.** Оновлений access token зберігався лише в пам'яті й губився після рестарту. Refresh token ніколи не ротувався, тому через ~200 днів сесія просто вмирала. Прострочена сесія під час фонової перевірки викликала MessageBox на кожному тіку.
-
-**Час і мережа.**
-- `TimeAligner` синхронізувався один раз за весь запуск, а при помилці повторював запит щосекунди.
-- Для кожного запиту створювався новий `WebClient`, без таймаутів і без retry.
-- Кукі сесій жили в спільному `CookieContainer`.
-
-**Надійність.**
-- Семафор фонової перевірки не звільнявся при винятку, і перевірка назавжди зупинялася.
-- `catch {}` ковтав усі помилки.
-- `Process.Start(url)` не працює на .NET Core.
-- Пошук порівнював нижній регістр запиту з оригінальним регістром імен.
-- Застосунок працював лише на Windows (WinForms).
-
-## Що зроблено
-
-**Trade protection (#1111).** Перед першим підтвердженням трейду автоматично надсилається `POST https://steamcommunity.com/trade/new/acknowledge` (`sessionid`, `message=1`). Це той самий запит, який шле popup у браузері, і так само робить ArchiSteamFarm. Прапорець зберігається для кожного акаунта окремо.
-
-Якщо Steam усе одно відмовляє, робиться acknowledge і один повтор. Після цього кожне підтвердження надсилається окремо, щоб показати, яке саме не пройшло. Вручну: меню *Account → Acknowledge trade protection notice* або `arcline-sda ack-trade-protection <acc>`.
-
-**Шифрування за замовчуванням.** Режиму без шифрування немає. Кожен `.maFile` — це AES-256-GCM із ключем від PBKDF2-SHA256 (600k ітерацій). Файл самодостатній: сіль і nonce лежать у ньому, а заголовок захищено автентифікацією. Записи атомарні, на Linux права файлів `600`. Plaintext-файли, знайдені в папці сховища, програма пропонує одразу зашифрувати й знищити.
-
-**Використання maFile в інших програмах.** Для разового перенесення є кілька варіантів.
-- `export` створює окремий зашифрований файл із *власним* паролем для передачі.
-- Там же можна свідомо отримати plaintext у форматі SDA.
-- Розшифрувати файл можна через `arcline-sda decrypt` (сховище не потрібне), бібліотекою `Arcline.SteamGuard` або `tools/mafile_decrypt.py`.
-
-Формат описаний у [docs/features/MAFILE_FORMAT.md](docs/features/MAFILE_FORMAT.md).
-
-**Робота зі Steam.**
-- Один пул `HttpClient` з таймаутами та retry (експоненційний backoff, `Retry-After`, 429/5xx).
-- Кукі формуються окремо для кожного акаунта.
-- Access token оновлюється автоматично й зберігається зашифрованим, refresh token ротується (`renewal_type=1`).
-- `needauth` обробляється примусовим refresh і одним повтором.
-- Час пересинхронізовується кожні 30 хв, після збою не частіше ніж раз на 60 с.
-- Логін іде через SteamKit2 з таймаутом і персистентною сесією.
-- Під час фонової перевірки кількох акаунтів між запитами є пауза.
-
-**Підтвердження в GUI:**
-- чекбокси, «Select all» (Ctrl+A), «Accept / Deny selected»;
-- фільтр Trades / Market / Other;
-- перемикач «All accounts», що показує підтвердження всіх акаунтів одним списком;
-- F5 оновлює список.
-
-**Сумісність.** Імпорт старої папки SDA (зашифрованої й ні), імпорт plaintext maFile. Невідомі поля maFile зберігаються.
-
-## Перенесення на інший ПК
-
-| Ситуація | GUI | CLI |
-|---|---|---|
-| Новий ПК, сховища ще немає | Старий ПК: *File → Back up vault*. Новий ПК: перший екран → *Restore from backup*, далі той самий пароль | `arcline-sda backup vault.zip`, потім на новому ПК `arcline-sda restore vault.zip` |
-| На новому ПК вже є своє сховище | *File → Import from another vault / backup* (пароль того сховища) | `arcline-sda import-vault vault.zip` |
-| Один акаунт в іншу програму | *Account → Export maFile* (зашифрований або plaintext) | `arcline-sda export acc --out f.maFile [--plaintext]` |
-
-Резервна копія — це той самий зашифрований вміст (`vault.json` + `*.maFile`) в одному zip. Секретів у відкритому вигляді в ній немає, тож її можна передавати флешкою чи хмарою. Також можна просто скопіювати папку сховища й відкрити її через `--vault`, або покласти її поруч із програмою як `vault/` (portable-режим). Формат однаковий на Windows і Linux.
-
-## Наскільки захищені зашифровані maFiles
-
-Без пароля дані з файлу не отримати: AES-256-GCM вважається незламним. Атакувати можна лише сам пароль, перебором офлайн. PBKDF2 з 600 000 ітерацій робить кожну спробу дорогою, але від слабкого пароля це не рятує. Тому використовуйте довгу фразу з 4–5 випадкових слів або 14+ символів. Пароль, який не можна вгадати, файл тримає надійно.
-
-Від чого шифрування **не** захищає:
-- **шкідливе ПЗ на розблокованому ПК:** поки сховище відкрите, секрети в пам'яті, а кейлогер може перехопити пароль;
-- **plaintext-експорт:** такий файл треба видалити одразу після імпорту;
-- **слабкий пароль**.
-
-**Сіль у відкритому вигляді — це нормально.** Сіль не є секретом ні в стандарті PBKDF2, ні тут, ні в старому SDA. Вона потрібна лише для того, щоб одна й та сама фраза давала різні ключі, і щоб не працювали заздалегідь пораховані таблиці. Знання солі нічого не дає без пароля. Секретних у файлі лише дві речі: ваш пароль, якого у файлі немає, і шифротекст. Окрім того, сіль, кількість ітерацій, `steamid` і `account_name` входять до автентифікованих даних GCM. Будь-яка їх підміна ламає розшифрування, і це покрито тестом.
-
-## Збірка
-
-```bash
-dotnet build EAArclineSDA.slnx
-```
-
-```bash
-dotnet test EAArclineSDA.slnx
-```
-
-```bash
-dotnet publish src/Arcline.SDA.Desktop -c Release -r linux-x64 --self-contained false
-```
-
-SDK встановлено локально в `.dotnet/`. Щоб використати саме його, запускайте `.\.dotnet\dotnet.exe`.
-
-## CLI: приклади
+## CLI
 
 ```bash
 arcline-sda init
-```
-
-```bash
-arcline-sda import-sda "C:\old\SDA"
 ```
 
 ```bash
@@ -125,22 +93,52 @@ arcline-sda export myacc --out myacc.enc.maFile
 ```
 
 ```bash
-arcline-sda decrypt myacc.enc.maFile --out plain.maFile
+arcline-sda backup vault.zip
 ```
 
-Паролі ніколи не передаються аргументами. Джерела такі: `--passphrase-file`, `$ARCLINE_SDA_PASSPHRASE`, `$ARCLINE_SDA_TRANSFER_PASSPHRASE` або інтерактивний ввід. Сховище знаходиться за `--vault`, `$ARCLINE_SDA_VAULT`, у папці `vault/` поруч із бінарником (portable-режим) або в `%APPDATA%\ArclineSDA\vault` чи `~/.config/ArclineSDA/vault`.
+```bash
+arcline-sda --help
+```
 
-## Перевірено / не перевірено
+Secrets are never accepted as arguments. The CLI reads them from a `--passphrase-file`, from `$ARCLINE_SDA_PASSPHRASE` / `$ARCLINE_SDA_TRANSFER_PASSPHRASE`, or from a prompt.
 
-**Перевірено.**
-- 27 юніт-тестів ядра:
-  - коди й підписи побайтно збігаються з оригінальним SteamAuth;
-  - старі зашифровані файли SDA читаються;
-  - підміну заголовка видно;
-  - сценарії trade protection перевірено на фейковому Steam.
-- 2 headless UI-тести.
-- Наскрізний прогін CLI.
-- Python-дешифратор на файлі, експортованому з CLI.
-- Публікація під linux-x64.
+Exit codes:
 
-**Не перевірено на реальному акаунті Steam:** логін, прив'язка автентифікатора, підтвердження, acknowledge та видалення автентифікатора. Логіку запитів звірено зі старим SDA та ArchiSteamFarm, але перший прогін на справжньому акаунті варто робити обережно. На Linux збірка є, але GUI там не запускався.
+| Code | Meaning |
+|---|---|
+| 0 | OK |
+| 1 | Error |
+| 2 | Usage |
+| 3 | Wrong passphrase |
+| 4 | Session expired |
+
+## Building from source
+
+You need the .NET 10 SDK.
+
+```bash
+dotnet test EAArclineSDA.slnx
+```
+
+```bash
+dotnet run --project src/Arcline.SDA.Desktop
+```
+
+Pushing a tag `vX.Y.Z` that matches `<Version>` in `Directory.Build.props` builds the release archives on GitHub Actions. Project docs (architecture, decisions, roadmap) are in [docs/](docs/README.md).
+
+| Project | What |
+|---|---|
+| `src/Arcline.SteamGuard` | Core library: vault and crypto, codes, confirmations, sessions, linking, legacy SDA import |
+| `src/Arcline.SDA.Desktop` | Avalonia desktop app |
+| `src/Arcline.SDA.Cli` | `arcline-sda` command-line tool |
+| `tools/mafile_decrypt.py` | Reference decryptor |
+
+## Status
+
+The protocol code is checked against the original SteamAuth implementation: codes and confirmation signatures match byte for byte. It is unit-tested against a fake Steam, including trade protection, sessions, vault, migration and the UI.
+
+**Not yet verified against a live Steam account:** login, linking, confirmations and authenticator removal. Please report issues.
+
+## License
+
+MIT, see [LICENSE](LICENSE). Based on Steam Desktop Authenticator and SteamAuth (both MIT); see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Not affiliated with Valve.

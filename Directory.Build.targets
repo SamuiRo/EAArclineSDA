@@ -1,0 +1,11 @@
+<Project>
+  <!--
+    SteamKit2 is LGPL-2.1: keep it as a separate, user-replaceable SteamKit2.dll next to the
+    executable instead of embedding it in single-file release builds.
+  -->
+  <Target Name="KeepLgplLibrariesReplaceable" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Update="@(ResolvedFileToPublish)" Condition="'%(Filename)' == 'SteamKit2'" ExcludeFromSingleFile="true" />
+    </ItemGroup>
+  </Target>
+</Project>

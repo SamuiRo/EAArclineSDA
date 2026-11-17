@@ -1,0 +1,93 @@
+name: Release
+
+# Pushing a tag vX.Y.Z (matching <Version> in Directory.Build.props) publishes a GitHub release
+# with ready-to-run, self-contained builds. No .NET installation is needed to run them.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.server_url == 'https://github.com'
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: ubuntu-latest
+            rid: linux-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Check tag matches version
+        shell: bash
+        run: |
+          v=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' Directory.Build.props)
+          if [ "v$v" != "$GITHUB_REF_NAME" ]; then echo "Tag $GITHUB_REF_NAME does not match <Version>$v</Version>"; exit 1; fi
+          grep -q "^## \[$v\]" docs/project/CHANGELOG.md || { echo "No CHANGELOG entry for $v"; exit 1; }
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+
+      - name: Test
+        run: dotnet test EAArclineSDA.slnx -c Release
+
+      - name: Publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="artifacts/ArclineSDA-$VERSION-${{ matrix.rid }}"
+          for p in src/Arcline.SDA.Desktop src/Arcline.SDA.Cli; do
+            dotnet publish "$p" -c Release -r ${{ matrix.rid }} --self-contained true \
+              -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true \
+              -p:EnableCompressionInSingleFile=true -p:DebugType=none -p:GenerateDocumentationFile=false \
+              -o "$out"
+          done
+          cp LICENSE THIRD_PARTY_NOTICES.md README.md README.uk.md tools/mafile_decrypt.py "$out/"
+          echo "OUT=$out" >> "$GITHUB_ENV"
+
+      - name: Archive (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path "$env:OUT" -DestinationPath "artifacts/ArclineSDA-$env:VERSION-${{ matrix.rid }}.zip"
+
+      - name: Archive (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          chmod +x "$OUT/ArclineSDA" "$OUT/arcline-sda"
+          tar -C artifacts -czf "artifacts/ArclineSDA-$VERSION-${{ matrix.rid }}.tar.gz" "$(basename "$OUT")"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.rid }}
+          path: |
+            artifacts/*.zip
+            artifacts/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums and notes
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          (cd dist && sha256sum * > SHA256SUMS.txt)
+          awk -v h="## [$v]" 'index($0, h) == 1 { f = 1; next } /^## \[/ { if (f) exit } f' docs/project/CHANGELOG.md > notes.md
+          printf '\n---\nDownload the archive for your OS, extract it, run **ArclineSDA** (GUI) or **arcline-sda** (CLI). No .NET install needed. Verify downloads against `SHA256SUMS.txt`.\n' >> notes.md
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "Arcline SDA ${GITHUB_REF_NAME#v}" --notes-file notes.md

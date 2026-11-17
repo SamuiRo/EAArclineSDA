@@ -4,8 +4,11 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>2.1.0</Version>
-    <Authors>Daedalus Aureum</Authors>
+    <Version>2.2.0</Version>
+    <Authors>StarLith</Authors>
+    <Copyright>Copyright (c) 2026 StarLith</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/SamuiRo/EAArclineSDA</RepositoryUrl>
     <Product>Arcline SDA</Product>
     <Deterministic>true</Deterministic>
     <InvariantGlobalization>true</InvariantGlobalization>
