@@ -28,13 +28,13 @@ public sealed partial class AccountsViewModel : ObservableObject, IDisposable
     private readonly HashSet<ulong> _seenConfirmations = [];
     private bool _disposed;
 
-    public AccountsViewModel(MaFileVault vault, Dialogs dialogs, Action lockAction, Action<string> setTitle)
+    public AccountsViewModel(MaFileVault vault, Dialogs dialogs, Action lockAction, Action<string> setTitle, SteamGuardClient? client = null)
     {
         Vault = vault;
         _dialogs = dialogs;
         _lock = lockAction;
         _setTitle = setTitle;
-        Client = new SteamGuardClient(vault);
+        Client = client ?? new SteamGuardClient(vault);
         _codeTimer = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background, (_, _) => UpdateCode());
         _pollTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(60) };
         _pollTimer.Tick += async (_, _) => await PollAsync();
@@ -133,10 +133,13 @@ public sealed partial class AccountsViewModel : ObservableObject, IDisposable
     {
         if (_filtering || ReferenceEquals(value, _shown)) return;
         _shown = value;
-        Confirmations.Clear();
-        ConfirmationsError = null;
         UpdateCode();
         _setTitle(value is null ? "Arcline SDA" : $"Arcline SDA - {value.Name}");
+        // In "all accounts" mode the list does not depend on the selected account.
+        if (ShowAllAccounts) return;
+        _allConfirmations.Clear();
+        RebuildConfirmations();
+        ConfirmationsError = null;
         if (value is not null) _ = RefreshConfirmationsAsync();
     }
 
@@ -166,31 +169,121 @@ public sealed partial class AccountsViewModel : ObservableObject, IDisposable
 
     // ------------------------------------------------------------------ confirmations
 
+    // All loaded confirmations; Confirmations is the filtered view the UI shows.
+    private readonly List<ConfirmationItem> _allConfirmations = [];
+    private int _loadVersion;
+    private bool _bulkSelecting;
+
+    [ObservableProperty] private bool _showAllAccounts;
+    [ObservableProperty] private ConfirmationFilter _filter = ConfirmationFilter.All;
+
+    public IReadOnlyList<ConfirmationFilter> Filters { get; } = Enum.GetValues<ConfirmationFilter>();
+
+    public int SelectedCount => Confirmations.Count(c => c.IsSelected);
+    public bool HasSelectedConfirmations => SelectedCount > 0;
+    public string AcceptSelectedText => $"Accept selected ({SelectedCount})";
+    public string DenySelectedText => $"Deny selected ({SelectedCount})";
+    public string ConfirmationsHeader => Confirmations.Count == _allConfirmations.Count
+        ? $"Confirmations ({Confirmations.Count})"
+        : $"Confirmations ({Confirmations.Count} of {_allConfirmations.Count})";
+
+    /// <summary>Header checkbox: checked = all visible selected, unchecked = none, null = some.</summary>
+    public bool? AllSelected
+    {
+        get => Confirmations.Count == 0 || SelectedCount == 0 ? false : SelectedCount == Confirmations.Count ? true : null;
+        set => SetAllSelected(value != false);
+    }
+
+    partial void OnShowAllAccountsChanged(bool value)
+    {
+        _allConfirmations.Clear();
+        RebuildConfirmations();
+        _ = RefreshConfirmationsAsync();
+    }
+
+    partial void OnFilterChanged(ConfirmationFilter value) => RebuildConfirmations();
+
+    private void RebuildConfirmations()
+    {
+        Confirmations.Clear();
+        foreach (var c in _allConfirmations.Where(c => c.Matches(Filter))) Confirmations.Add(c);
+        // Hidden items must not be acted on by "selected" actions.
+        foreach (var hidden in _allConfirmations.Where(c => !c.Matches(Filter))) hidden.IsSelected = false;
+        NotifySelection();
+    }
+
+    private void NotifySelection()
+    {
+        if (_bulkSelecting) return;
+        OnPropertyChanged(nameof(SelectedCount));
+        OnPropertyChanged(nameof(HasSelectedConfirmations));
+        OnPropertyChanged(nameof(AcceptSelectedText));
+        OnPropertyChanged(nameof(DenySelectedText));
+        OnPropertyChanged(nameof(AllSelected));
+        OnPropertyChanged(nameof(ConfirmationsHeader));
+        AcceptSelectedCommand.NotifyCanExecuteChanged();
+        DenySelectedCommand.NotifyCanExecuteChanged();
+    }
+
+    private void SetAllSelected(bool selected)
+    {
+        _bulkSelecting = true;
+        try { foreach (var c in Confirmations) c.IsSelected = selected; }
+        finally { _bulkSelecting = false; }
+        NotifySelection();
+    }
+
+    [RelayCommand]
+    private void SelectAll() => SetAllSelected(true);
+
+    [RelayCommand]
+    private void SelectNone() => SetAllSelected(false);
+
+    private ConfirmationItem Track(ConfirmationItem item)
+    {
+        item.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(ConfirmationItem.IsSelected)) NotifySelection(); };
+        return item;
+    }
+
     [RelayCommand]
     private async Task RefreshConfirmationsAsync()
     {
-        var acc = Current;
-        var item = Selected;
-        if (acc is null || item is null) return;
+        var targets = ShowAllAccounts ? Accounts.ToList() : Selected is null ? [] : [Selected];
+        if (targets.Count == 0) return;
+        var version = ++_loadVersion;
+        var keepSelected = _allConfirmations.Where(c => c.IsSelected).Select(c => c.Id).ToHashSet();
         LoadingConfirmations = true;
         ConfirmationsError = null;
+        var loaded = new List<ConfirmationItem>();
+        var problems = new List<string>();
         try
         {
-            var list = await Client.Confirmations.GetAsync(acc);
-            if (Selected != item) return;
-            Confirmations.Clear();
-            foreach (var c in list) Confirmations.Add(new ConfirmationItem(c));
-            item.Pending = list.Count;
-            item.NeedsLogin = false;
-            if (list.Count == 0) ConfirmationsError = "Nothing to confirm.";
+            foreach (var item in targets)
+            {
+                if (!_cache.TryGetValue(item.SteamId, out var acc)) continue;
+                try
+                {
+                    var list = await Client.Confirmations.GetAsync(acc);
+                    item.Pending = list.Count;
+                    item.NeedsLogin = false;
+                    loaded.AddRange(list.Select(c => Track(new ConfirmationItem(c, item, ShowAllAccounts) { IsSelected = keepSelected.Contains(c.Id) })));
+                }
+                catch (SessionExpiredException)
+                {
+                    item.NeedsLogin = true;
+                    problems.Add(ShowAllAccounts ? $"{item.Name}: session expired, use \"Log in again\"." : "Session expired. Use \"Log in again\".");
+                }
+                catch (SteamGuardException ex) { problems.Add(ShowAllAccounts ? $"{item.Name}: {ex.Message}" : ex.Message); }
+                if (version != _loadVersion) return; // a newer refresh (or account switch) superseded this one
+                if (targets.Count > 1) await Task.Delay(300);
+            }
+            _allConfirmations.Clear();
+            _allConfirmations.AddRange(loaded.OrderByDescending(c => c.Confirmation.CreationTime));
+            RebuildConfirmations();
+            if (problems.Count > 0) ConfirmationsError = string.Join(Environment.NewLine, problems);
+            else if (loaded.Count == 0) ConfirmationsError = "Nothing to confirm.";
         }
-        catch (SessionExpiredException)
-        {
-            item.NeedsLogin = true;
-            ConfirmationsError = "Session expired. Use \"Log in again\".";
-        }
-        catch (SteamGuardException ex) { ConfirmationsError = ex.Message; }
-        finally { LoadingConfirmations = false; }
+        finally { if (version == _loadVersion) LoadingConfirmations = false; }
     }
 
     [RelayCommand]
@@ -199,47 +292,68 @@ public sealed partial class AccountsViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private Task DenyAsync(ConfirmationItem item) => RespondAsync([item], false);
 
-    [RelayCommand]
-    private async Task AcceptAllAsync()
+    [RelayCommand(CanExecute = nameof(HasSelectedConfirmations))]
+    private Task AcceptSelectedAsync() => RespondAsync(Confirmations.Where(c => c.IsSelected).ToList(), true);
+
+    [RelayCommand(CanExecute = nameof(HasSelectedConfirmations))]
+    private async Task DenySelectedAsync()
     {
-        if (Confirmations.Count == 0) return;
-        if (!await _dialogs.ConfirmAsync("Accept all", $"Accept all {Confirmations.Count} confirmations for {Selected?.Name}?", "Accept all")) return;
-        await RespondAsync(Confirmations.ToList(), true);
+        var items = Confirmations.Where(c => c.IsSelected).ToList();
+        if (items.Count > 1 && !await _dialogs.ConfirmAsync("Deny selected", $"Deny {items.Count} confirmations? Denied trades are cancelled.", "Deny")) return;
+        await RespondAsync(items, false);
     }
 
-    [RelayCommand]
-    private async Task DenyAllAsync()
-    {
-        if (Confirmations.Count == 0) return;
-        if (!await _dialogs.ConfirmAsync("Deny all", $"Deny all {Confirmations.Count} confirmations for {Selected?.Name}?", "Deny all")) return;
-        await RespondAsync(Confirmations.ToList(), false);
-    }
-
+    /// <summary>Responds per account (one batched Steam request per account), then updates the list in place.</summary>
     private async Task RespondAsync(IReadOnlyList<ConfirmationItem> items, bool accept)
     {
-        var acc = Current;
-        if (acc is null) return;
+        if (items.Count == 0) return;
         foreach (var i in items) { i.Busy = true; i.Error = null; }
+        int ok = 0, failed = 0;
         try
         {
-            var results = await Client.Confirmations.RespondAsync(acc, items.Select(i => i.Confirmation).ToList(), accept);
-            foreach (var r in results)
+            foreach (var group in items.GroupBy(i => i.Account))
             {
-                var item = items.First(i => i.Id == r.ConfirmationId);
-                if (r.Success) Confirmations.Remove(item);
-                else item.Error = r.Message;
+                if (!_cache.TryGetValue(group.Key.SteamId, out var acc)) continue;
+                try
+                {
+                    var results = await Client.Confirmations.RespondAsync(acc, group.Select(i => i.Confirmation).ToList(), accept);
+                    foreach (var r in results)
+                    {
+                        var item = group.First(i => i.Id == r.ConfirmationId);
+                        if (r.Success)
+                        {
+                            ok++;
+                            _allConfirmations.Remove(item);
+                            Confirmations.Remove(item);
+                        }
+                        else
+                        {
+                            failed++;
+                            item.Error = r.Message;
+                        }
+                    }
+                    group.Key.Pending = _allConfirmations.Count(c => c.Account == group.Key);
+                }
+                catch (SessionExpiredException)
+                {
+                    group.Key.NeedsLogin = true;
+                    failed += group.Count();
+                    foreach (var i in group) i.Error = "Session expired. Use \"Log in again\" for this account.";
+                }
+                catch (SteamGuardException ex)
+                {
+                    failed += group.Count();
+                    foreach (var i in group) i.Error = ex.Message;
+                }
             }
-            var failed = results.Count(r => !r.Success);
-            Status = failed == 0 ? $"{(accept ? "Accepted" : "Denied")} {results.Count}." : $"{failed} of {results.Count} failed.";
-            if (Selected is not null) Selected.Pending = Confirmations.Count;
+            Status = failed == 0 ? $"{(accept ? "Accepted" : "Denied")} {ok}." : $"{(accept ? "Accepted" : "Denied")} {ok}, {failed} failed (see the cards).";
+            if (_allConfirmations.Count == 0) ConfirmationsError = "Nothing to confirm.";
         }
-        catch (SessionExpiredException)
+        finally
         {
-            if (Selected is not null) Selected.NeedsLogin = true;
-            Status = "Session expired. Use \"Log in again\".";
+            foreach (var i in items) i.Busy = false;
+            NotifySelection();
         }
-        catch (SteamGuardException ex) { Status = ex.Message; }
-        finally { foreach (var i in items) i.Busy = false; }
     }
 
     [RelayCommand]
@@ -263,6 +377,7 @@ public sealed partial class AccountsViewModel : ObservableObject, IDisposable
         {
             var targets = Vault.Settings.CheckAllAccounts ? Accounts.ToList() : Selected is null ? [] : [Selected];
             var newOnes = new List<string>();
+            var refreshVisible = false;
             foreach (var item in targets)
             {
                 if (!_cache.TryGetValue(item.SteamId, out var acc) || item.NeedsLogin) continue;
@@ -281,7 +396,7 @@ public sealed partial class AccountsViewModel : ObservableObject, IDisposable
                     item.Pending = manual.Count;
                     var fresh = manual.Where(c => _seenConfirmations.Add(c.Id)).ToList();
                     if (fresh.Count > 0) newOnes.Add($"{item.Name}: {fresh.Count} new");
-                    if (item == Selected && fresh.Count > 0) await RefreshConfirmationsAsync();
+                    if (fresh.Count > 0 && (ShowAllAccounts || item == Selected)) refreshVisible = true;
                 }
                 catch (SessionExpiredException)
                 {
@@ -292,6 +407,7 @@ public sealed partial class AccountsViewModel : ObservableObject, IDisposable
                 if (targets.Count > 1) await Task.Delay(750); // be gentle with Steam when checking many accounts
             }
             if (newOnes.Count > 0) _dialogs.Notify("Confirmations waiting", string.Join(Environment.NewLine, newOnes));
+            if (refreshVisible) await RefreshConfirmationsAsync();
         }
         finally { _pollGate.Release(); }
     }

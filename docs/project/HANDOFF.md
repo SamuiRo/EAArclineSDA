@@ -2,7 +2,7 @@
 
 ## Поточний стан
 
-Версія **2.0.0**, перший коміт на `master`. Це переписаний Steam Desktop Authenticator. Оригінал лежить поруч у `S:\Daedalus\Aureum\SteamDesktopAuthenticator` і використовується лише як референс.
+Версія **2.1.0** на `master`. Remote-и: `starbase` (Forgejo, upstream) і `github`. Звичайний `git push` відправляє в обидва, бо в `starbase` два pushurl, а `push.followTags=true`. Це переписаний Steam Desktop Authenticator. Оригінал лежить поруч у `S:\Daedalus\Aureum\SteamDesktopAuthenticator` і використовується лише як референс.
 
 Що є:
 - ядро `Arcline.SteamGuard`, CLI `arcline-sda`, GUI на Avalonia 11;
@@ -11,7 +11,7 @@
 - maFiles зашифровані за замовчуванням;
 - експорт і імпорт, міграція сховища між ПК, імпорт старої папки SDA.
 
-Тести: 34 юніт-тести ядра (включно з міграцією) і 2 headless UI-тести. Усі проходять.
+Тести: 34 юніт-тести ядра (включно з міграцією) і 4 headless UI-тести (з них 2 на вибір, фільтр і масові дії з підтвердженнями проти фейкового Steam). Усі проходять.
 
 SDK встановлено локально: `.dotnet\dotnet.exe` (у git не потрапляє). Збірка й тести: `.\.dotnet\dotnet.exe test EAArclineSDA.slnx`.
 
@@ -34,3 +34,4 @@ SDK встановлено локально: `.dotnet\dotnet.exe` (у git не �
 
 - Проаналізовано старий SDA, переписано з нуля (ядро, CLI, GUI), виправлено #1111, введено формат `arcline-mafile` v1.
 - Додано резервну копію, відновлення та злиття сховищ для переїзду між ПК. Ініціалізовано git на `master`, задокументовано 2.0.0.
+- Налаштовано push у Forgejo (`starbase`) і GitHub одночасно, ключ `id_ed25519_starlith` через SSH-аліаси. Вийшла 2.1.0: вибір, фільтр, масові дії та режим «All accounts» для підтверджень.

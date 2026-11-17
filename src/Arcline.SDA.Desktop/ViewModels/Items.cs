@@ -14,9 +14,14 @@ public sealed partial class AccountItem(ulong steamId, string name) : Observable
     public bool HasPending => Pending > 0;
 }
 
-public sealed partial class ConfirmationItem(Confirmation c) : ObservableObject
+public enum ConfirmationFilter { All, Trades, Market, Other }
+
+public sealed partial class ConfirmationItem(Confirmation c, AccountItem account, bool showAccount) : ObservableObject
 {
     public Confirmation Confirmation { get; } = c;
+    public AccountItem Account { get; } = account;
+    public bool ShowAccount { get; } = showAccount;
+    public string AccountName => Account.Name;
     public ulong Id => Confirmation.Id;
     public string Headline => Confirmation.Headline ?? Confirmation.TypeName ?? "Confirmation";
     public string Summary => Confirmation.Description;
@@ -25,6 +30,15 @@ public sealed partial class ConfirmationItem(Confirmation c) : ObservableObject
     public string AcceptText => string.IsNullOrWhiteSpace(Confirmation.AcceptText) ? "Accept" : Confirmation.AcceptText!;
     public string CancelText => string.IsNullOrWhiteSpace(Confirmation.CancelText) ? "Deny" : Confirmation.CancelText!;
 
+    public bool Matches(ConfirmationFilter f) => f switch
+    {
+        ConfirmationFilter.Trades => Confirmation.Type == ConfirmationType.Trade,
+        ConfirmationFilter.Market => Confirmation.Type == ConfirmationType.MarketListing,
+        ConfirmationFilter.Other => Confirmation.Type is not (ConfirmationType.Trade or ConfirmationType.MarketListing),
+        _ => true,
+    };
+
+    [ObservableProperty] private bool _isSelected;
     [ObservableProperty][NotifyPropertyChangedFor(nameof(IsIdle))] private bool _busy;
     [ObservableProperty] private string? _error;
 
