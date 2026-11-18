@@ -7,7 +7,7 @@ A cross-platform (Windows and Linux) rewrite of [Steam Desktop Authenticator](ht
 - Trade confirmations work again after Steam's July 2025 Trade Protection change.
 - The core is a library your own programs can use.
 
-Current version: **2.2.0** ([CHANGELOG](docs/project/CHANGELOG.md)).
+Current version: **2.3.0** ([CHANGELOG](docs/project/CHANGELOG.md)).
 
 > Use at your own risk. Whoever holds your maFile and its passphrase controls your Steam account. Keep the passphrase strong and the revocation code written down.
 
@@ -41,7 +41,7 @@ Notes:
   - checkboxes, *Select all* (Ctrl+A), *Accept / Deny selected*;
   - filter by type (trades / market / other);
   - an *All accounts* view that lists every account's confirmations together;
-  - optional background checks and auto-confirm.
+  - optional background checks, with separate auto-confirm switches for trades, market listings (selling) and purchases. Sensitive types such as API keys or phone changes are never auto-confirmed.
 - **Trade Protection fix ([SDA #1111](https://github.com/Jessecar96/SteamDesktopAuthenticator/issues/1111)).** Steam rejects trade confirmations until the account has accepted a one-time notice in the web UI. The old SDA ignored that rejection, so *Confirm* silently did nothing. Arcline acknowledges the notice automatically (`POST /trade/new/acknowledge`, the same request the browser popup sends, as ArchiSteamFarm does), retries once, and reports any confirmation that still fails.
 - **Encrypted by default.** There is no unencrypted mode.
   - Every maFile is AES-256-GCM, with the key derived by PBKDF2-SHA256 at 600k iterations.

@@ -20,6 +20,7 @@ public class ConfirmationsUiTests
     private sealed class FakeSteam : HttpMessageHandler
     {
         public List<string> Calls { get; } = [];
+        public string? Acc0List { get; set; }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
@@ -31,7 +32,7 @@ public class ConfirmationsUiTests
             {
                 "/ITwoFactorService/QueryTime/v1/" => $"{{\"response\":{{\"server_time\":\"{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}\"}}}}",
                 "/mobileconf/getlist" => steamId == 0
-                    ? """{"success":true,"conf":[{"type":2,"id":"11","nonce":"1","creation_time":3,"headline":"Trade A"},{"type":2,"id":"12","nonce":"2","creation_time":2,"headline":"Trade B"},{"type":3,"id":"13","nonce":"3","creation_time":1,"headline":"Sell item"}]}"""
+                    ? Acc0List ?? """{"success":true,"conf":[{"type":2,"id":"11","nonce":"1","creation_time":3,"headline":"Trade A"},{"type":2,"id":"12","nonce":"2","creation_time":2,"headline":"Trade B"},{"type":3,"id":"13","nonce":"3","creation_time":1,"headline":"Sell item"}]}"""
                     : """{"success":true,"conf":[{"type":2,"id":"21","nonce":"4","creation_time":5,"headline":"Trade C"}]}""",
                 _ => "{\"success\":true}",
             };
@@ -122,6 +123,36 @@ public class ConfirmationsUiTests
         Assert.Equal(13UL, left.Id);
         Assert.False(left.IsSelected); // hidden items are never acted on or left selected
         Assert.Equal(1, vm.Selected!.Pending);
+        vm.Dispose();
+        w.Close();
+    }
+
+    [AvaloniaTheory]
+    [InlineData(true, false, false, "101")]
+    [InlineData(false, true, false, "102")]
+    [InlineData(false, false, true, "103")]
+    [InlineData(true, true, true, "101,102,103")]
+    [InlineData(false, false, false, "")]
+    public async Task AutoConfirm_EachTypeIsIndependent_AndApiKeysNever(bool trades, bool market, bool purchases, string expectedIds)
+    {
+        var (vm, fake, w) = Create();
+        fake.Acc0List = """{"success":true,"conf":[{"type":2,"id":"101","nonce":"1","headline":"Trade"},{"type":3,"id":"102","nonce":"2","headline":"Sell"},{"type":12,"id":"103","nonce":"3","headline":"Buy"},{"type":9,"id":"104","nonce":"4","headline":"API key"}]}""";
+        vm.Vault.Settings.AutoConfirmTrades = trades;
+        vm.Vault.Settings.AutoConfirmMarket = market;
+        vm.Vault.Settings.AutoConfirmPurchases = purchases;
+        vm.Start();
+        await Settle(vm);
+        fake.Calls.Clear();
+
+        await vm.PollAsync();
+        await Settle(vm);
+
+        var accepted = fake.Calls
+            .Where(c => c.StartsWith("/mobileconf/multiajaxop", StringComparison.Ordinal) && c.Contains("op=allow", StringComparison.Ordinal))
+            .SelectMany(c => System.Text.RegularExpressions.Regex.Matches(c, @"cid%5B%5D=(\d+)").Select(m => m.Groups[1].Value))
+            .Order().ToList();
+        Assert.Equal(expectedIds.Length == 0 ? [] : expectedIds.Split(','), accepted);
+        Assert.DoesNotContain("104", accepted);
         vm.Dispose();
         w.Close();
     }

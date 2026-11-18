@@ -11,6 +11,17 @@ Numbering continues the original SDA (last release 1.0.15). 2.0.0 is a major bec
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-11-18
+
+### Added
+- Separate auto-confirm switches for **trades**, **market listings** (selling) and **purchases** (Steam type 12). Each one is opt-in on its own.
+- Other confirmation types are never auto-confirmed: API keys, phone or recovery changes, family invites, and any type Steam adds later.
+- The notification after auto-confirming says how many items of each type were confirmed. Auto-confirmations that Steam rejects stay in the list for you to handle, and you get a warning.
+
+### Changed
+- Enabling any auto-confirm switch also turns on periodic checking. Without it, auto-confirm would silently do nothing.
+- The settings dialog groups the switches under "Auto-confirm without asking", and the warning lists exactly which types are being enabled.
+
 ## [2.2.0] - 2026-11-17
 
 ### Added

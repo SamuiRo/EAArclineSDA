@@ -38,9 +38,26 @@ public sealed class VaultSettings
     [JsonPropertyName("periodic_checking")] public bool PeriodicChecking { get; set; }
     [JsonPropertyName("periodic_checking_interval_seconds")] public int PeriodicCheckingIntervalSeconds { get; set; } = 60;
     [JsonPropertyName("check_all_accounts")] public bool CheckAllAccounts { get; set; }
+    /// <summary>Market listings, i.e. selling items on the Steam Community Market.</summary>
     [JsonPropertyName("auto_confirm_market")] public bool AutoConfirmMarket { get; set; }
     [JsonPropertyName("auto_confirm_trades")] public bool AutoConfirmTrades { get; set; }
+    /// <summary>Purchase confirmations (Steam type 12).</summary>
+    [JsonPropertyName("auto_confirm_purchases")] public bool AutoConfirmPurchases { get; set; }
     [JsonPropertyName("minimize_to_tray")] public bool MinimizeToTray { get; set; }
 
     public int EffectiveIntervalSeconds => Math.Clamp(PeriodicCheckingIntervalSeconds, 15, 3600);
+
+    public bool AnyAutoConfirm => AutoConfirmTrades || AutoConfirmMarket || AutoConfirmPurchases;
+
+    /// <summary>
+    /// Whether background checking may accept this confirmation without asking. Each type is opt-in on its own;
+    /// everything else (API keys, phone/recovery changes, family, unknown types) is never auto-confirmed.
+    /// </summary>
+    public bool ShouldAutoConfirm(Models.Confirmation c) => c.Type switch
+    {
+        Models.ConfirmationType.Trade => AutoConfirmTrades,
+        Models.ConfirmationType.MarketListing => AutoConfirmMarket,
+        Models.ConfirmationType.Purchase => AutoConfirmPurchases,
+        _ => false,
+    };
 }

@@ -70,32 +70,47 @@ public sealed class Dialogs(Func<Window?> owner)
         var periodic = new CheckBox { Content = "Check for confirmations periodically", IsChecked = s.PeriodicChecking };
         var interval = new NumericUpDown { Minimum = 15, Maximum = 3600, Increment = 15, Value = s.EffectiveIntervalSeconds, FormatString = "0", Width = 160 };
         var all = new CheckBox { Content = "Check all accounts (not only the selected one)", IsChecked = s.CheckAllAccounts };
-        var market = new CheckBox { Content = "Auto-confirm market listings (risky)", IsChecked = s.AutoConfirmMarket };
-        var trades = new CheckBox { Content = "Auto-confirm trades (risky: confirms ANY trade, including scams)", IsChecked = s.AutoConfirmTrades };
+        var trades = new CheckBox { Content = "Trades (accepts ANY trade, including scams)", IsChecked = s.AutoConfirmTrades };
+        var market = new CheckBox { Content = "Market listings (selling items)", IsChecked = s.AutoConfirmMarket };
+        var purchases = new CheckBox { Content = "Purchases", IsChecked = s.AutoConfirmPurchases };
         var tray = new CheckBox { Content = "Closing the window hides it to the tray", IsChecked = s.MinimizeToTray };
         var ok = await ShowAsync<bool>("Settings", "", (p, _) =>
         {
             p.Children.Add(periodic);
             p.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { new TextBlock { Text = "Interval (seconds):", VerticalAlignment = VerticalAlignment.Center }, interval } });
             p.Children.Add(all);
-            p.Children.Add(market);
-            p.Children.Add(trades);
+            p.Children.Add(new TextBlock { Text = "Auto-confirm without asking:", FontWeight = FontWeight.SemiBold, Margin = new Thickness(0, 8, 0, 0) });
+            var group = new StackPanel { Spacing = 4, Margin = new Thickness(16, 0, 0, 0), Children = { trades, market, purchases } };
+            p.Children.Add(group);
+            p.Children.Add(new TextBlock
+            {
+                Text = "Each type is independent. Works only while the app is running and checking periodically; other types (API keys, phone or recovery changes) are never auto-confirmed.",
+                TextWrapping = TextWrapping.Wrap, MaxWidth = 460, Opacity = 0.7, FontSize = 12, Margin = new Thickness(16, 0, 0, 8),
+            });
             p.Children.Add(tray);
             return periodic;
         }, [("Save", true, true), ("Cancel", false, false)]);
         if (!ok) return false;
 
-        var wantsAuto = (market.IsChecked == true && !s.AutoConfirmMarket) || (trades.IsChecked == true && !s.AutoConfirmTrades);
-        if (wantsAuto && !await ConfirmAsync("Warning", "Auto-confirmation accepts confirmations without asking you. Anyone who gets a session on your account can then move items freely. Continue?", "Enable", "Cancel"))
+        var newlyEnabled = new List<string>();
+        if (trades.IsChecked == true && !s.AutoConfirmTrades) newlyEnabled.Add("trades");
+        if (market.IsChecked == true && !s.AutoConfirmMarket) newlyEnabled.Add("market listings");
+        if (purchases.IsChecked == true && !s.AutoConfirmPurchases) newlyEnabled.Add("purchases");
+        if (newlyEnabled.Count > 0 && !await ConfirmAsync("Warning",
+                $"Auto-confirm {string.Join(", ", newlyEnabled)}?\n\nThese will be accepted without asking you. If someone else gets into your Steam session, they can move items and money freely.",
+                "Enable", "Cancel"))
         {
-            market.IsChecked = s.AutoConfirmMarket;
             trades.IsChecked = s.AutoConfirmTrades;
+            market.IsChecked = s.AutoConfirmMarket;
+            purchases.IsChecked = s.AutoConfirmPurchases;
         }
-        s.PeriodicChecking = periodic.IsChecked == true;
         s.PeriodicCheckingIntervalSeconds = (int)(interval.Value ?? 60);
         s.CheckAllAccounts = all.IsChecked == true;
-        s.AutoConfirmMarket = market.IsChecked == true;
         s.AutoConfirmTrades = trades.IsChecked == true;
+        s.AutoConfirmMarket = market.IsChecked == true;
+        s.AutoConfirmPurchases = purchases.IsChecked == true;
+        // Auto-confirm does nothing without background checking, so turn it on rather than silently not working.
+        s.PeriodicChecking = periodic.IsChecked == true || s.AnyAutoConfirm;
         s.MinimizeToTray = tray.IsChecked == true;
         return true;
     }

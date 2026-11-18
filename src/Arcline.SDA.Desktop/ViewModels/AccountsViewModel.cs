@@ -370,7 +370,16 @@ public sealed partial class AccountsViewModel : ObservableObject, IDisposable
 
     // ------------------------------------------------------------------ background polling
 
-    private async Task PollAsync()
+    private static string Describe(ConfirmationType t) => t switch
+    {
+        ConfirmationType.Trade => "trade(s)",
+        ConfirmationType.MarketListing => "market listing(s)",
+        ConfirmationType.Purchase => "purchase(s)",
+        _ => t.ToString(),
+    };
+
+    /// <summary>One background check (also run by the timer). Internal for tests.</summary>
+    internal async Task PollAsync()
     {
         if (_disposed || !await _pollGate.WaitAsync(0)) return;
         try
@@ -384,15 +393,22 @@ public sealed partial class AccountsViewModel : ObservableObject, IDisposable
                 try
                 {
                     var list = await Client.Confirmations.GetAsync(acc);
-                    var auto = list.Where(c => (c.Type == ConfirmationType.MarketListing && Vault.Settings.AutoConfirmMarket)
-                                            || (c.Type == ConfirmationType.Trade && Vault.Settings.AutoConfirmTrades)).ToList();
+                    var auto = list.Where(Vault.Settings.ShouldAutoConfirm).ToList();
+                    var autoFailed = new HashSet<ulong>();
                     if (auto.Count > 0)
                     {
                         var res = await Client.Confirmations.AcceptAsync(acc, auto);
-                        var ok = res.Count(r => r.Success);
-                        if (ok > 0) _dialogs.Notify(item.Name, $"Auto-confirmed {ok} confirmation(s).", NotificationType.Success);
+                        var done = auto.Where(c => res.Any(r => r.ConfirmationId == c.Id && r.Success)).ToList();
+                        foreach (var r in res.Where(r => !r.Success)) autoFailed.Add(r.ConfirmationId);
+                        if (done.Count > 0 && (ShowAllAccounts || item == Selected)) refreshVisible = true;
+                        if (done.Count > 0)
+                            _dialogs.Notify(item.Name, "Auto-confirmed: " + string.Join(", ",
+                                done.GroupBy(c => c.Type).Select(g => $"{g.Count()} {Describe(g.Key)}")), NotificationType.Success);
+                        if (autoFailed.Count > 0)
+                            _dialogs.Notify(item.Name, $"{autoFailed.Count} auto-confirmation(s) failed; they are left for you to handle.", NotificationType.Warning);
                     }
-                    var manual = list.Except(auto).ToList();
+                    // Whatever was not auto-confirmed successfully stays pending for the user.
+                    var manual = list.Where(c => !auto.Contains(c) || autoFailed.Contains(c.Id)).ToList();
                     item.Pending = manual.Count;
                     var fresh = manual.Where(c => _seenConfirmations.Add(c.Id)).ToList();
                     if (fresh.Count > 0) newOnes.Add($"{item.Name}: {fresh.Count} new");
