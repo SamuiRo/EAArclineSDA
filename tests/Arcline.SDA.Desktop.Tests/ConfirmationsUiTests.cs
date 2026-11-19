@@ -137,9 +137,7 @@ public class ConfirmationsUiTests
     {
         var (vm, fake, w) = Create();
         fake.Acc0List = """{"success":true,"conf":[{"type":2,"id":"101","nonce":"1","headline":"Trade"},{"type":3,"id":"102","nonce":"2","headline":"Sell"},{"type":12,"id":"103","nonce":"3","headline":"Buy"},{"type":9,"id":"104","nonce":"4","headline":"API key"}]}""";
-        vm.Vault.Settings.AutoConfirmTrades = trades;
-        vm.Vault.Settings.AutoConfirmMarket = market;
-        vm.Vault.Settings.AutoConfirmPurchases = purchases;
+        vm.Vault.SetAutoConfirm(76561198000000000UL, new AutoConfirmRules { Trades = trades, Market = market, Purchases = purchases });
         vm.Start();
         await Settle(vm);
         fake.Calls.Clear();
@@ -153,6 +151,36 @@ public class ConfirmationsUiTests
             .Order().ToList();
         Assert.Equal(expectedIds.Length == 0 ? [] : expectedIds.Split(','), accepted);
         Assert.DoesNotContain("104", accepted);
+        vm.Dispose();
+        w.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task AutoConfirm_IsPerAccount_AndUnselectedAccountsWithRulesAreStillChecked()
+    {
+        var (vm, fake, w) = Create();
+        // acc0 (selected): only market listings. acc1 (not selected, "all accounts" off): only trades.
+        vm.Vault.SetAutoConfirm(76561198000000000UL, new AutoConfirmRules { Market = true });
+        vm.Vault.SetAutoConfirm(76561198000000001UL, new AutoConfirmRules { Trades = true });
+        vm.Start();
+        await Settle(vm);
+        Assert.Equal("acc0", vm.Selected!.Name);
+        Assert.Equal("Auto-confirm: Market", vm.SelectedAutoConfirm);
+        Assert.True(vm.Accounts.Single(a => a.Name == "acc1").HasAutoConfirm);
+        fake.Calls.Clear();
+
+        await vm.PollAsync();
+        await Settle(vm);
+
+        var accepts = fake.Calls.Where(c => c.StartsWith("/mobileconf/multiajaxop", StringComparison.Ordinal) && c.Contains("op=allow", StringComparison.Ordinal)).ToList();
+        var acc0 = Assert.Single(accepts, c => c.Contains("a=76561198000000000", StringComparison.Ordinal));
+        var acc1 = Assert.Single(accepts, c => c.Contains("a=76561198000000001", StringComparison.Ordinal));
+        Assert.Contains("cid%5B%5D=13", acc0);          // acc0's market listing
+        Assert.DoesNotContain("cid%5B%5D=11", acc0);    // acc0's trades stay manual
+        Assert.Contains("cid%5B%5D=21", acc1);          // acc1's trade
+        Directory.CreateDirectory(Path.Combine(AppContext.BaseDirectory, "screenshots"));
+        Dispatcher.UIThread.RunJobs();
+        w.CaptureRenderedFrame()?.Save(Path.Combine(AppContext.BaseDirectory, "screenshots", "auto-confirm.png"));
         vm.Dispose();
         w.Close();
     }

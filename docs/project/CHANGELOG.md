@@ -11,6 +11,21 @@ Numbering continues the original SDA (last release 1.0.15). 2.0.0 is a major bec
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-11-19
+
+### Added
+- **Auto-confirm per account.** *Account > Auto-confirm...* (or the button under the code) chooses what that account confirms by itself: trades, market listings, purchases, in any combination. Everything else stays manual. Accounts with auto-confirm are checked in the background even when they are not selected. The account list marks them "auto".
+- **Tray and startup:**
+  - *Start with Windows* / *Start when I log in* starts the app minimized in the tray (HKCU `Run` key on Windows, `~/.config/autostart` on Linux);
+  - minimizing or closing keeps the app in the tray;
+  - starting it again brings the running instance to the front.
+- **Unlock automatically on this PC** (optional, off by default) keeps the vault passphrase in the OS's protected store (Windows DPAPI / Linux Secret Service via `secret-tool`), so auto-confirm works right after startup.
+- **Remove app data from this PC** (*File* menu, or `arcline-sda cleanup [--include-vault]`) removes the autostart entry, the saved passphrase, logs and leftovers of older versions, optionally including the vault.
+
+### Changed
+- Auto-confirm switches moved from Settings to each account. Switches set in 2.3.0–2.4.0 are copied to every account automatically on first start, so nothing stops working.
+- Release builds no longer unpack native libraries into a temp folder (`%TEMP%\.net\ArclineSDA`, `~/.net/...`), where they stayed after the app was deleted. They now ship next to the executables, and the executables are about half the size.
+
 ## [2.4.0] - 2026-11-19
 
 ### Added

@@ -10,8 +10,10 @@ public sealed partial class AccountItem(ulong steamId, string name) : Observable
 
     [ObservableProperty][NotifyPropertyChangedFor(nameof(HasPending))] private int _pending;
     [ObservableProperty] private bool _needsLogin;
+    [ObservableProperty][NotifyPropertyChangedFor(nameof(HasAutoConfirm))] private string _autoConfirm = "Off";
 
     public bool HasPending => Pending > 0;
+    public bool HasAutoConfirm => AutoConfirm != "Off";
 }
 
 public enum ConfirmationFilter { All, Trades, Market, Other }

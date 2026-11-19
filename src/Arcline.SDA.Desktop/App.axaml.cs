@@ -22,12 +22,44 @@ public sealed partial class App : Application
             _window = new MainWindow();
             var dialogs = new Services.Dialogs(() => _window);
             InstallErrorHandlers(dialogs);
-            _window.DataContext = new MainWindowViewModel(dialogs);
+            var vm = new MainWindowViewModel(dialogs);
+            vm.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(MainWindowViewModel.Current)) UpdateTray(vm); };
+            _window.DataContext = vm;
             _window.Closed += (_, _) => desktop.Shutdown();
-            desktop.MainWindow = _window;
+            // Started at login: live in the tray; the window appears when the tray icon is clicked.
+            if (!Program.StartMinimized) desktop.MainWindow = _window;
+            UpdateTray(vm);
+            StartInstanceServer();
         }
         base.OnFrameworkInitializationCompleted();
     }
+
+    private void UpdateTray(MainWindowViewModel vm)
+    {
+        var icon = TrayIcon.GetIcons(this)?.FirstOrDefault();
+        if (icon is null) return;
+        icon.ToolTipText = vm.Current is UnlockViewModel ? "Arcline SDA (locked): click to unlock" : "Arcline SDA";
+    }
+
+    /// <summary>Lets a second launch (e.g. a double-click while running in the tray) bring this window to the front.</summary>
+    private void StartInstanceServer() => Task.Run(async () =>
+    {
+        while (true)
+        {
+            try
+            {
+                using var server = new System.IO.Pipes.NamedPipeServerStream(Program.InstancePipeName, System.IO.Pipes.PipeDirection.In, 1,
+                    System.IO.Pipes.PipeTransmissionMode.Byte, System.IO.Pipes.PipeOptions.Asynchronous | System.IO.Pipes.PipeOptions.CurrentUserOnly);
+                await server.WaitForConnectionAsync().ConfigureAwait(false);
+                server.ReadByte();
+                Dispatcher.UIThread.Post(ShowWindow);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                await Task.Delay(2000).ConfigureAwait(false);
+            }
+        }
+    });
 
     /// <summary>
     /// Last line of defence: an error nobody caught is logged and shown instead of closing the app

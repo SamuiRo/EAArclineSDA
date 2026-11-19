@@ -58,6 +58,7 @@ try
         case "remove": Remove(); break;
         case "deactivate": await Deactivate(); break;
         case "where": Console.WriteLine(vaultDir); break;
+        case "cleanup": CleanupCmd(); break;
         default: throw new UsageException($"Unknown command '{cmd}'.");
     }
     return 0;
@@ -372,6 +373,23 @@ void ImportVault()
     if (res.Errors.Count > 0) Environment.ExitCode = 1;
 }
 
+void CleanupCmd()
+{
+    var includeVault = a.Flag("include-vault");
+    Console.Error.WriteLine("Removes what Arcline stored outside its folder: autostart entry, saved auto-unlock passphrase, logs, old temp files.");
+    if (includeVault)
+    {
+        Console.Error.WriteLine($"--include-vault: ALSO permanently deletes the vault at {vaultDir} (every account in it).");
+        if (!a.Flag("yes") && ConsoleIO.ReadLine("Type DELETE to confirm: ")?.Trim() != "DELETE") throw new OperationCanceledException();
+    }
+    else if (!ConsoleIO.Confirm("Continue? (the vault is kept)", a.Flag("yes"))) return;
+    var report = Arcline.SteamGuard.Platform.Cleanup.Run(includeVault, vaultDir);
+    foreach (var r in report.Removed) Console.Error.WriteLine($"removed  {r}");
+    foreach (var f in report.Failed) Console.Error.WriteLine($"FAILED   {f}");
+    if (report.Removed.Count == 0 && report.Failed.Count == 0) Console.Error.WriteLine("Nothing to remove.");
+    if (report.Failed.Count > 0) Environment.ExitCode = 1;
+}
+
 void Remove()
 {
     using var v = OpenVault();
@@ -409,6 +427,7 @@ Vault
   list                         List accounts (no passphrase needed)
   passwd                       Change the vault passphrase (re-encrypts every file)
   where                        Print the vault directory
+  cleanup [--include-vault]    Remove app data outside the app folder (autostart, saved passphrase, logs)
 
 Codes and confirmations
   code <acc> [--watch]         Current Steam Guard code

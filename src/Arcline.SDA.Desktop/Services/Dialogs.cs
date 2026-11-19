@@ -65,54 +65,90 @@ public sealed class Dialogs(Func<Window?> owner)
         return (user.Text.Trim(), pass.Text);
     }
 
-    public async Task<bool> EditSettingsAsync(VaultSettings s)
+    /// <summary>App-wide options edited in the Settings dialog. Fields not stored in vault.json come from the OS.</summary>
+    public sealed record AppOptions(bool StartWithOs, bool StartWithOsSupported, bool AutoUnlock, string? AutoUnlockUnavailable);
+
+    public async Task<AppOptions?> EditSettingsAsync(VaultSettings s, AppOptions current, bool anyAutoConfirm)
     {
         var periodic = new CheckBox { Content = "Check for confirmations periodically", IsChecked = s.PeriodicChecking };
         var interval = new NumericUpDown { Minimum = 15, Maximum = 3600, Increment = 15, Value = s.EffectiveIntervalSeconds, FormatString = "0", Width = 160 };
-        var all = new CheckBox { Content = "Check all accounts (not only the selected one)", IsChecked = s.CheckAllAccounts };
-        var trades = new CheckBox { Content = "Trades (accepts ANY trade, including scams)", IsChecked = s.AutoConfirmTrades };
-        var market = new CheckBox { Content = "Market listings (selling items)", IsChecked = s.AutoConfirmMarket };
-        var purchases = new CheckBox { Content = "Purchases", IsChecked = s.AutoConfirmPurchases };
-        var tray = new CheckBox { Content = "Closing the window hides it to the tray", IsChecked = s.MinimizeToTray };
+        var all = new CheckBox { Content = "Notify about all accounts (not only the selected one)", IsChecked = s.CheckAllAccounts };
+        var tray = new CheckBox { Content = "Minimizing or closing the window keeps the app running in the tray", IsChecked = s.MinimizeToTray };
+        var autostart = new CheckBox
+        {
+            Content = OperatingSystem.IsWindows() ? "Start with Windows (in the tray)" : "Start when I log in (in the tray)",
+            IsChecked = current.StartWithOs, IsEnabled = current.StartWithOsSupported,
+        };
+        var autoUnlock = new CheckBox
+        {
+            Content = "Unlock the vault automatically on this PC",
+            IsChecked = current.AutoUnlock, IsEnabled = current.AutoUnlockUnavailable is null,
+        };
+        static TextBlock Note(string text) => new()
+        {
+            Text = text, TextWrapping = TextWrapping.Wrap, MaxWidth = 470, Opacity = 0.7, FontSize = 12, Margin = new Thickness(28, -4, 0, 4),
+        };
+        static TextBlock Header(string text) => new() { Text = text, FontWeight = FontWeight.SemiBold, Margin = new Thickness(0, 8, 0, 0) };
+
         var ok = await ShowAsync<bool>("Settings", "", (p, _) =>
         {
+            p.Children.Add(Header("Background checking"));
             p.Children.Add(periodic);
-            p.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { new TextBlock { Text = "Interval (seconds):", VerticalAlignment = VerticalAlignment.Center }, interval } });
+            p.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(28, 0, 0, 0), Children = { new TextBlock { Text = "Every (seconds):", VerticalAlignment = VerticalAlignment.Center }, interval } });
             p.Children.Add(all);
-            p.Children.Add(new TextBlock { Text = "Auto-confirm without asking:", FontWeight = FontWeight.SemiBold, Margin = new Thickness(0, 8, 0, 0) });
-            var group = new StackPanel { Spacing = 4, Margin = new Thickness(16, 0, 0, 0), Children = { trades, market, purchases } };
-            p.Children.Add(group);
-            p.Children.Add(new TextBlock
-            {
-                Text = "Each type is independent. Works only while the app is running and checking periodically; other types (API keys, phone or recovery changes) are never auto-confirmed.",
-                TextWrapping = TextWrapping.Wrap, MaxWidth = 460, Opacity = 0.7, FontSize = 12, Margin = new Thickness(16, 0, 0, 8),
-            });
+            p.Children.Add(Note("Auto-confirm is set per account: select an account, then Account > Auto-confirm. Accounts with auto-confirm are always checked."));
+
+            p.Children.Add(Header("Tray and startup"));
             p.Children.Add(tray);
+            p.Children.Add(autostart);
+            p.Children.Add(autoUnlock);
+            p.Children.Add(Note(current.AutoUnlockUnavailable ??
+                "Stores the vault passphrase in the OS's protected store (Windows DPAPI / the Linux keyring), so auto-confirm can run right after startup. " +
+                "Any program running as your OS user could then open the vault on this PC. Backups and exported files still need the passphrase."));
             return periodic;
         }, [("Save", true, true), ("Cancel", false, false)]);
-        if (!ok) return false;
+        if (!ok) return null;
 
-        var newlyEnabled = new List<string>();
-        if (trades.IsChecked == true && !s.AutoConfirmTrades) newlyEnabled.Add("trades");
-        if (market.IsChecked == true && !s.AutoConfirmMarket) newlyEnabled.Add("market listings");
-        if (purchases.IsChecked == true && !s.AutoConfirmPurchases) newlyEnabled.Add("purchases");
-        if (newlyEnabled.Count > 0 && !await ConfirmAsync("Warning",
-                $"Auto-confirm {string.Join(", ", newlyEnabled)}?\n\nThese will be accepted without asking you. If someone else gets into your Steam session, they can move items and money freely.",
-                "Enable", "Cancel"))
-        {
-            trades.IsChecked = s.AutoConfirmTrades;
-            market.IsChecked = s.AutoConfirmMarket;
-            purchases.IsChecked = s.AutoConfirmPurchases;
-        }
         s.PeriodicCheckingIntervalSeconds = (int)(interval.Value ?? 60);
         s.CheckAllAccounts = all.IsChecked == true;
-        s.AutoConfirmTrades = trades.IsChecked == true;
-        s.AutoConfirmMarket = market.IsChecked == true;
-        s.AutoConfirmPurchases = purchases.IsChecked == true;
-        // Auto-confirm does nothing without background checking, so turn it on rather than silently not working.
-        s.PeriodicChecking = periodic.IsChecked == true || s.AnyAutoConfirm;
-        s.MinimizeToTray = tray.IsChecked == true;
-        return true;
+        // Auto-confirm does nothing without background checking, so keep it on while any account uses it.
+        s.PeriodicChecking = periodic.IsChecked == true || anyAutoConfirm;
+        s.MinimizeToTray = tray.IsChecked == true || autostart.IsChecked == true; // starting in the tray implies living in the tray
+        return current with { StartWithOs = autostart.IsChecked == true, AutoUnlock = autoUnlock.IsChecked == true };
+    }
+
+    /// <summary>Per-account auto-confirm switches. Returns the new rules, or null on cancel.</summary>
+    public async Task<AutoConfirmRules?> EditAutoConfirmAsync(string account, AutoConfirmRules current)
+    {
+        var trades = new CheckBox { Content = "Trades (accepts ANY trade offer, including scams)", IsChecked = current.Trades };
+        var market = new CheckBox { Content = "Market listings (selling items)", IsChecked = current.Market };
+        var purchases = new CheckBox { Content = "Purchases", IsChecked = current.Purchases };
+        var ok = await ShowAsync<bool>($"Auto-confirm - {account}",
+            $"What should {account} confirm automatically? Everything unchecked stays manual.", (p, _) =>
+            {
+                p.Children.Add(trades);
+                p.Children.Add(market);
+                p.Children.Add(purchases);
+                p.Children.Add(new TextBlock
+                {
+                    Text = "API keys, phone or recovery changes and any unknown type are never auto-confirmed. " +
+                           "Works while the app is running (window or tray) and unlocked; background checking is turned on automatically.",
+                    TextWrapping = TextWrapping.Wrap, MaxWidth = 460, Opacity = 0.7, FontSize = 12,
+                });
+                return trades;
+            }, [("Save", true, true), ("Cancel", false, false)]);
+        if (!ok) return null;
+
+        var next = new AutoConfirmRules { Trades = trades.IsChecked == true, Market = market.IsChecked == true, Purchases = purchases.IsChecked == true };
+        var newlyEnabled = new List<string>();
+        if (next.Trades && !current.Trades) newlyEnabled.Add("trades");
+        if (next.Market && !current.Market) newlyEnabled.Add("market listings");
+        if (next.Purchases && !current.Purchases) newlyEnabled.Add("purchases");
+        if (newlyEnabled.Count > 0 && !await ConfirmAsync("Warning",
+                $"Auto-confirm {string.Join(", ", newlyEnabled)} for {account}?\n\nThese will be accepted without asking you. If someone else gets into your Steam session, they can move items and money freely.",
+                "Enable", "Cancel"))
+            return null;
+        return next;
     }
 
     public async Task<string?> OpenFileAsync(string title, params string[] patterns)

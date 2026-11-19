@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using Arcline.SteamGuard.Crypto;
+using Arcline.SteamGuard.Models;
 
 namespace Arcline.SteamGuard.Storage;
 
@@ -20,6 +21,25 @@ public sealed class VaultIndex
     [JsonPropertyName("settings")] public VaultSettings Settings { get; set; } = new();
 
     [JsonPropertyName("accounts")] public List<VaultEntry> Accounts { get; set; } = [];
+
+    /// <summary>
+    /// 2.3.0 stored auto-confirm switches once for all accounts. They are now per account. When an old vault.json
+    /// is loaded, the old global switches are copied to every account and then cleared.
+    /// Returns true if anything changed (the caller saves).
+    /// </summary>
+    public bool MigrateLegacySettings()
+    {
+        var s = Settings;
+        if (!(s.LegacyAutoConfirmTrades || s.LegacyAutoConfirmMarket || s.LegacyAutoConfirmPurchases)) return false;
+        foreach (var a in Accounts)
+        {
+            a.AutoConfirm.Trades |= s.LegacyAutoConfirmTrades;
+            a.AutoConfirm.Market |= s.LegacyAutoConfirmMarket;
+            a.AutoConfirm.Purchases |= s.LegacyAutoConfirmPurchases;
+        }
+        s.LegacyAutoConfirmTrades = s.LegacyAutoConfirmMarket = s.LegacyAutoConfirmPurchases = false;
+        return true;
+    }
 }
 
 public sealed class VaultEntry
@@ -29,8 +49,42 @@ public sealed class VaultEntry
     [JsonPropertyName("file")] public string File { get; set; } = "";
     [JsonPropertyName("trade_protection_acknowledged")] public bool TradeProtectionAcknowledged { get; set; }
     [JsonPropertyName("added_at")] public DateTimeOffset AddedAt { get; set; } = DateTimeOffset.UtcNow;
+    [JsonPropertyName("auto_confirm")] public AutoConfirmRules AutoConfirm { get; set; } = new();
 
     [JsonIgnore] public string DisplayName => AccountName ?? SteamId.ToString();
+}
+
+/// <summary>
+/// What this account confirms on its own during background checks. Each type is opt-in separately.
+/// Everything else (API keys, phone/recovery changes, family, unknown or future types) is never auto-confirmed.
+/// </summary>
+public sealed class AutoConfirmRules
+{
+    [JsonPropertyName("trades")] public bool Trades { get; set; }
+    /// <summary>Market listings, i.e. selling items on the Steam Community Market.</summary>
+    [JsonPropertyName("market")] public bool Market { get; set; }
+    /// <summary>Purchase confirmations (Steam type 12).</summary>
+    [JsonPropertyName("purchases")] public bool Purchases { get; set; }
+
+    [JsonIgnore] public bool Any => Trades || Market || Purchases;
+
+    public bool Allows(Confirmation c) => c.Type switch
+    {
+        ConfirmationType.Trade => Trades,
+        ConfirmationType.MarketListing => Market,
+        ConfirmationType.Purchase => Purchases,
+        _ => false,
+    };
+
+    /// <summary>Short label for the UI, e.g. "Market, Purchases" or "Off".</summary>
+    public override string ToString()
+    {
+        var parts = new List<string>(3);
+        if (Trades) parts.Add("Trades");
+        if (Market) parts.Add("Market");
+        if (Purchases) parts.Add("Purchases");
+        return parts.Count == 0 ? "Off" : string.Join(", ", parts);
+    }
 }
 
 public sealed class VaultSettings
@@ -38,26 +92,12 @@ public sealed class VaultSettings
     [JsonPropertyName("periodic_checking")] public bool PeriodicChecking { get; set; }
     [JsonPropertyName("periodic_checking_interval_seconds")] public int PeriodicCheckingIntervalSeconds { get; set; } = 60;
     [JsonPropertyName("check_all_accounts")] public bool CheckAllAccounts { get; set; }
-    /// <summary>Market listings, i.e. selling items on the Steam Community Market.</summary>
-    [JsonPropertyName("auto_confirm_market")] public bool AutoConfirmMarket { get; set; }
-    [JsonPropertyName("auto_confirm_trades")] public bool AutoConfirmTrades { get; set; }
-    /// <summary>Purchase confirmations (Steam type 12).</summary>
-    [JsonPropertyName("auto_confirm_purchases")] public bool AutoConfirmPurchases { get; set; }
     [JsonPropertyName("minimize_to_tray")] public bool MinimizeToTray { get; set; }
 
+    // Pre-2.5.0 global auto-confirm switches; read only for migration (see VaultIndex.MigrateLegacySettings).
+    [JsonPropertyName("auto_confirm_market")][JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public bool LegacyAutoConfirmMarket { get; set; }
+    [JsonPropertyName("auto_confirm_trades")][JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public bool LegacyAutoConfirmTrades { get; set; }
+    [JsonPropertyName("auto_confirm_purchases")][JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public bool LegacyAutoConfirmPurchases { get; set; }
+
     public int EffectiveIntervalSeconds => Math.Clamp(PeriodicCheckingIntervalSeconds, 15, 3600);
-
-    public bool AnyAutoConfirm => AutoConfirmTrades || AutoConfirmMarket || AutoConfirmPurchases;
-
-    /// <summary>
-    /// Whether background checking may accept this confirmation without asking. Each type is opt-in on its own;
-    /// everything else (API keys, phone/recovery changes, family, unknown types) is never auto-confirmed.
-    /// </summary>
-    public bool ShouldAutoConfirm(Models.Confirmation c) => c.Type switch
-    {
-        Models.ConfirmationType.Trade => AutoConfirmTrades,
-        Models.ConfirmationType.MarketListing => AutoConfirmMarket,
-        Models.ConfirmationType.Purchase => AutoConfirmPurchases,
-        _ => false,
-    };
 }

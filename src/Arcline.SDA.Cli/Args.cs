@@ -7,7 +7,7 @@ internal sealed class Args
     private readonly HashSet<string> _flags = new(StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> KnownFlags = new(StringComparer.OrdinalIgnoreCase)
     {
-        "json", "all", "version", "plaintext", "shred", "overwrite", "no-backup", "watch", "yes", "help", "h",
+        "json", "all", "version", "include-vault", "plaintext", "shred", "overwrite", "no-backup", "watch", "yes", "help", "h",
     };
 
     public List<string> Positionals { get; } = [];

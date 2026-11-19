@@ -10,6 +10,8 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="SteamKit2" Version="3.5.0" />
+    <!-- Windows DPAPI for the optional "unlock automatically on this PC" feature. -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.14" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Arcline.SteamGuard.Tests" />

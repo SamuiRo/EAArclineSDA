@@ -43,8 +43,10 @@ jobs:
           set -euo pipefail
           out="artifacts/ArclineSDA-$VERSION-${{ matrix.rid }}"
           for p in src/Arcline.SDA.Desktop src/Arcline.SDA.Cli; do
+            # Native libraries (Skia, HarfBuzz, ANGLE) ship next to the executables instead of being
+            # self-extracted into a temp folder that would be left behind after the app is deleted.
             dotnet publish "$p" -c Release -r ${{ matrix.rid }} --self-contained true \
-              -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true \
+              -p:PublishSingleFile=true \
               -p:EnableCompressionInSingleFile=true -p:DebugType=none -p:GenerateDocumentationFile=false \
               -o "$out"
           done

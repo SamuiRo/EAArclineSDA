@@ -57,8 +57,29 @@ public sealed class MaFileVault : IAccountStateStore, IDisposable
         if (!string.IsNullOrWhiteSpace(env)) return Path.GetFullPath(env);
         var portable = Path.Combine(AppContext.BaseDirectory, "vault");
         if (File.Exists(Path.Combine(portable, IndexFileName))) return portable;
-        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData, Environment.SpecialFolderOption.Create), "ArclineSDA", "vault");
+        return Platform.AppPaths.DefaultVault;
     }
+
+    // ---------- per-account settings ----------
+
+    public VaultEntry? GetEntry(ulong steamId)
+    {
+        lock (_sync) return Index.Accounts.FirstOrDefault(a => a.SteamId == steamId);
+    }
+
+    /// <summary>Sets what this account auto-confirms. Turning any rule on also turns on periodic checking (otherwise nothing would run).</summary>
+    public void SetAutoConfirm(ulong steamId, AutoConfirmRules rules)
+    {
+        lock (_sync)
+        {
+            var e = Index.Accounts.FirstOrDefault(a => a.SteamId == steamId) ?? throw new SteamGuardException($"SteamID {steamId} is not in the vault.");
+            e.AutoConfirm = new AutoConfirmRules { Trades = rules.Trades, Market = rules.Market, Purchases = rules.Purchases };
+            if (rules.Any) Index.Settings.PeriodicChecking = true;
+            SaveIndex();
+        }
+    }
+
+    public bool ShouldAutoConfirm(ulong steamId, Models.Confirmation c) => GetEntry(steamId)?.AutoConfirm.Allows(c) ?? false;
 
     public static bool Exists(string directory) => File.Exists(Path.Combine(directory, IndexFileName));
 
@@ -82,7 +103,9 @@ public sealed class MaFileVault : IAccountStateStore, IDisposable
         var index = JsonSerializer.Deserialize<VaultIndex>(File.ReadAllText(path), Json.Options)
                     ?? throw new SteamGuardException("vault.json is empty.");
         if (index.Format != VaultIndex.FormatName) throw new SteamGuardException("vault.json has an unknown format.");
-        return new MaFileVault(directory, index);
+        var vault = new MaFileVault(directory, index);
+        if (index.MigrateLegacySettings()) vault.SaveIndex();
+        return vault;
     }
 
     public static void ValidateNewPassphrase(string passphrase)

@@ -7,7 +7,7 @@ A cross-platform (Windows and Linux) rewrite of [Steam Desktop Authenticator](ht
 - Trade confirmations work again after Steam's July 2025 Trade Protection change.
 - The core is a library your own programs can use.
 
-Current version: **2.4.0** ([CHANGELOG](docs/project/CHANGELOG.md)).
+Current version: **2.5.0** ([CHANGELOG](docs/project/CHANGELOG.md)).
 
 > Use at your own risk. Whoever holds your maFile and its passphrase controls your Steam account. Keep the passphrase strong and the revocation code written down.
 
@@ -41,7 +41,8 @@ Notes:
   - checkboxes, *Select all* (Ctrl+A), *Accept / Deny selected*;
   - filter by type (trades / market / other);
   - an *All accounts* view that lists every account's confirmations together;
-  - optional background checks, with separate auto-confirm switches for trades, market listings (selling) and purchases. Sensitive types such as API keys or phone changes are never auto-confirmed.
+  - **auto-confirm per account** (*Account → Auto-confirm…*): choose trades, market listings (selling) and/or purchases for each account; everything else stays manual. Sensitive types such as API keys or phone changes are never auto-confirmed.
+- **Tray and startup.** Optionally start with Windows / at login straight into the tray, and keep running in the tray when the window is closed. An optional *Unlock automatically on this PC* lets auto-confirm work right after startup (see Security).
 - **Trade Protection fix ([SDA #1111](https://github.com/Jessecar96/SteamDesktopAuthenticator/issues/1111)).** Steam rejects trade confirmations until the account has accepted a one-time notice in the web UI. The old SDA ignored that rejection, so *Confirm* silently did nothing. Arcline acknowledges the notice automatically (`POST /trade/new/acknowledge`, the same request the browser popup sends, as ArchiSteamFarm does), retries once, and reports any confirmation that still fails.
 - **Encrypted by default.** There is no unencrypted mode.
   - Every maFile is AES-256-GCM, with the key derived by PBKDF2-SHA256 at 600k iterations.
@@ -61,10 +62,29 @@ The encryption itself isn't the weak point. AES-256-GCM is not broken; an attack
 
 The salt and KDF parameters are stored in clear text by design, as in every PBKDF2 scheme. A salt isn't a secret. They are bound to the ciphertext through GCM's authenticated data, so tampering with them is detected.
 
+*Unlock automatically on this PC* (off by default) keeps the passphrase in the OS's protected store: Windows DPAPI, or the Linux Secret Service keyring via `secret-tool`. Then any program running as your OS user can open the vault on that PC. Backups and exported files still need the passphrase. Leave it off unless you need unattended auto-confirm.
+
 What encryption does **not** protect against:
 - malware on an unlocked machine (keyloggers, memory readers);
 - a plaintext export you forgot to delete;
 - a weak passphrase.
+
+## What is stored where, and uninstalling
+
+The app folder holds only the program. Outside it, Arcline writes:
+
+| What | Windows | Linux |
+|---|---|---|
+| Vault (your accounts, encrypted) | `%APPDATA%\ArclineSDA\vault` | `~/.config/ArclineSDA/vault` |
+| Error logs | `%APPDATA%\ArclineSDA\logs` | `~/.config/ArclineSDA/logs` |
+| Start with OS (if enabled) | `HKCU\…\CurrentVersion\Run\ArclineSDA` | `~/.config/autostart/arcline-sda.desktop` |
+| Auto-unlock (if enabled) | `%APPDATA%\ArclineSDA\autounlock.bin` (DPAPI) | Secret Service keyring entry `application=arcline-sda` |
+
+To uninstall:
+1. Run *File → Remove app data from this PC* (or `arcline-sda cleanup`). It removes everything above except the vault; you can tick an option to delete the vault too. It also removes temp files left by versions up to 2.4.0 (`%TEMP%\.net\ArclineSDA`).
+2. Delete the app folder.
+
+Back up the vault first if you might need the accounts again.
 
 ## Using maFiles in other programs
 

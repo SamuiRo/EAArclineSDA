@@ -4,6 +4,7 @@ using Arcline.SteamGuard;
 using Arcline.SteamGuard.Crypto;
 using Arcline.SteamGuard.Legacy;
 using Arcline.SteamGuard.Models;
+using Arcline.SteamGuard.Platform;
 using Arcline.SteamGuard.Steam;
 using Arcline.SteamGuard.Storage;
 using Avalonia;
@@ -28,8 +29,14 @@ public sealed partial class AccountsViewModel : ObservableObject, IDisposable
     private readonly HashSet<ulong> _seenConfirmations = [];
     private bool _disposed;
 
-    public AccountsViewModel(MaFileVault vault, Dialogs dialogs, Action lockAction, Action<string> setTitle, SteamGuardClient? client = null)
+    private readonly Autostart _autostart;
+    private readonly PassphraseStore _passphraseStore;
+
+    public AccountsViewModel(MaFileVault vault, Dialogs dialogs, Action lockAction, Action<string> setTitle, SteamGuardClient? client = null,
+        Autostart? autostart = null, PassphraseStore? passphraseStore = null)
     {
+        _autostart = autostart ?? new Autostart();
+        _passphraseStore = passphraseStore ?? new PassphraseStore();
         Vault = vault;
         _dialogs = dialogs;
         _lock = lockAction;
@@ -97,7 +104,7 @@ public sealed partial class AccountsViewModel : ObservableObject, IDisposable
             try
             {
                 _cache[e.SteamId] = Vault.Load(e.SteamId);
-                Accounts.Add(new AccountItem(e.SteamId, e.DisplayName));
+                Accounts.Add(new AccountItem(e.SteamId, e.DisplayName) { AutoConfirm = e.AutoConfirm.ToString() });
             }
             catch (SteamGuardException ex)
             {
@@ -133,6 +140,7 @@ public sealed partial class AccountsViewModel : ObservableObject, IDisposable
     {
         if (_filtering || ReferenceEquals(value, _shown)) return;
         _shown = value;
+        OnPropertyChanged(nameof(SelectedAutoConfirm));
         UpdateCode();
         _setTitle(value is null ? "Arcline SDA" : $"Arcline SDA - {value.Name}");
         // In "all accounts" mode the list does not depend on the selected account.
@@ -384,7 +392,8 @@ public sealed partial class AccountsViewModel : ObservableObject, IDisposable
         if (_disposed || !await _pollGate.WaitAsync(0)) return;
         try
         {
-            var targets = Vault.Settings.CheckAllAccounts ? Accounts.ToList() : Selected is null ? [] : [Selected];
+            // Accounts with auto-confirm are always checked; others only when "all accounts" is on or they are selected.
+            var targets = Accounts.Where(a => Vault.Settings.CheckAllAccounts || a == Selected || Vault.GetEntry(a.SteamId)?.AutoConfirm.Any == true).ToList();
             var newOnes = new List<string>();
             var refreshVisible = false;
             foreach (var item in targets)
@@ -393,7 +402,7 @@ public sealed partial class AccountsViewModel : ObservableObject, IDisposable
                 try
                 {
                     var list = await Client.Confirmations.GetAsync(acc);
-                    var auto = list.Where(Vault.Settings.ShouldAutoConfirm).ToList();
+                    var auto = list.Where(c => Vault.ShouldAutoConfirm(item.SteamId, c)).ToList();
                     var autoFailed = new HashSet<ulong>();
                     if (auto.Count > 0)
                     {
@@ -721,9 +730,90 @@ public sealed partial class AccountsViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task SettingsAsync()
     {
-        if (!await _dialogs.EditSettingsAsync(Vault.Settings)) return;
+        var exe = Environment.ProcessPath ?? "";
+        var current = new Dialogs.AppOptions(
+            StartWithOs: _autostart.IsEnabledForThisExecutable(exe),
+            StartWithOsSupported: Autostart.IsSupported,
+            AutoUnlock: await Task.Run(() => _passphraseStore.IsSaved(Vault.Directory)),
+            AutoUnlockUnavailable: _passphraseStore.UnavailableReason);
+        var next = await _dialogs.EditSettingsAsync(Vault.Settings, current, Accounts.Any(a => a.HasAutoConfirm));
+        if (next is null) return;
         Vault.SaveIndex();
         ApplySettings();
+
+        try
+        {
+            if (next.StartWithOs && !current.StartWithOs) _autostart.Enable(exe);
+            else if (!next.StartWithOs && current.StartWithOs) _autostart.Disable();
+        }
+        catch (Exception ex) when (ex is SteamGuardException or UnauthorizedAccessException or IOException or System.Security.SecurityException)
+        {
+            await _dialogs.AlertAsync("Start with OS", ex.Message);
+        }
+
+        if (next.AutoUnlock && !current.AutoUnlock)
+        {
+            var pass = await _dialogs.PromptAsync("Unlock automatically", "Enter the vault passphrase to store it in the OS's protected store:", password: true);
+            if (pass is null) return;
+            if (!await Task.Run(() => Vault.VerifyPassphrase(pass))) { await _dialogs.AlertAsync("Unlock automatically", "Wrong passphrase; nothing was stored."); return; }
+            try { await Task.Run(() => _passphraseStore.Save(Vault.Directory, pass)); Status = "The vault will unlock automatically on this PC."; }
+            catch (Exception ex) when (ex is SteamGuardException or IOException or System.Security.Cryptography.CryptographicException or System.ComponentModel.Win32Exception)
+            {
+                await _dialogs.AlertAsync("Unlock automatically", ex.Message);
+            }
+        }
+        else if (!next.AutoUnlock && current.AutoUnlock)
+        {
+            _passphraseStore.Remove(Vault.Directory);
+            Status = "The stored passphrase was removed from this PC.";
+        }
+    }
+
+    [RelayCommand]
+    private async Task EditAutoConfirmAsync()
+    {
+        if (Selected is not { } item || Vault.GetEntry(item.SteamId) is not { } entry) return;
+        var rules = await _dialogs.EditAutoConfirmAsync(item.Name, entry.AutoConfirm);
+        if (rules is null) return;
+        Vault.SetAutoConfirm(item.SteamId, rules);
+        item.AutoConfirm = rules.ToString();
+        OnPropertyChanged(nameof(SelectedAutoConfirm));
+        ApplySettings();
+        Status = rules.Any ? $"{item.Name}: auto-confirm {rules}." : $"{item.Name}: auto-confirm off.";
+        if (rules.Any) _ = PollAsync();
+    }
+
+    /// <summary>Text for the selected account's auto-confirm line in the code card.</summary>
+    public string SelectedAutoConfirm => Selected is null ? "" : $"Auto-confirm: {Selected.AutoConfirm}";
+
+    [RelayCommand]
+    private async Task RemoveAppDataAsync()
+    {
+        var choice = await _dialogs.ChooseAsync("Remove app data from this PC",
+            "Before deleting the app folder, this removes what Arcline stored elsewhere on this PC:\n" +
+            "  - the autostart entry\n  - the saved auto-unlock passphrase\n  - logs\n  - temporary files left by versions up to 2.4.0\n\n" +
+            $"The vault ({Vault.Directory}) holds your accounts. Keep it unless you have a backup or exports.",
+            "Remove, keep the vault", "Remove everything including the vault");
+        if (choice < 0) return;
+        var includeVault = choice == 1;
+        if (includeVault)
+        {
+            var typed = await _dialogs.PromptAsync("Delete the vault",
+                "This permanently deletes every account in the vault. Without a backup or the maFiles you may lose access to those Steam accounts.\n\nType DELETE to confirm:");
+            if (typed?.Trim() != "DELETE") { Status = "Nothing was deleted."; return; }
+        }
+        var vaultDir = Vault.Directory;
+        Dispose(); // stop timers and lock before deleting files
+        var report = Cleanup.Run(includeVault, vaultDir, _autostart, _passphraseStore);
+        await _dialogs.AlertAsync("Remove app data",
+            (report.Removed.Count == 0 ? "Nothing to remove." : "Removed:\n" + string.Join("\n", report.Removed)) +
+            (report.Failed.Count == 0 ? "" : "\n\nCould not remove:\n" + string.Join("\n", report.Failed)) +
+            "\n\nThe app will now close. Delete its folder to finish.");
+        if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime d)
+        {
+            if (d.MainWindow is Views.MainWindow w) w.AllowClose = true;
+            d.Shutdown();
+        }
     }
 
     [RelayCommand]
@@ -735,6 +825,8 @@ public sealed partial class AccountsViewModel : ObservableObject, IDisposable
         var next = await _dialogs.NewPassphraseAsync("Change passphrase", "New vault passphrase:");
         if (next is null) return;
         await Task.Run(() => Vault.ChangePassphrase(next));
+        // Keep auto-unlock working with the new passphrase.
+        if (await Task.Run(() => _passphraseStore.IsSaved(Vault.Directory))) await Task.Run(() => _passphraseStore.Save(Vault.Directory, next));
         Status = "Passphrase changed; all maFiles re-encrypted.";
     }
 
