@@ -120,6 +120,68 @@ public sealed class AuthenticatorLinker(SteamHttp http, SteamTime time, SessionD
         return FinalizeResult.GeneralFailure;
     }
 
+    // ---------- moving an existing authenticator (e.g. from the Steam app) to this app ----------
+
+    public enum TransferResult { Success, BadCode, Failed }
+
+    /// <summary>
+    /// Starts moving the account's existing mobile authenticator here: Steam texts a code to the phone on the account.
+    /// This is the same flow as "use this device" in the official app. Needs a phone number on the account.
+    /// Returns null on success, otherwise a user-facing reason.
+    /// </summary>
+    public async Task<string?> TransferStartAsync(CancellationToken ct = default)
+    {
+        var r = await CallWithResult("ITwoFactorService", "RemoveAuthenticatorViaChallengeStart", [], ct).ConfigureAwait(false);
+        if (r.IsOk) return null;
+        LastError = $"RemoveAuthenticatorViaChallengeStart EResult {r.EResult}";
+        return r.EResult switch
+        {
+            84 or 87 => "Steam is rate-limiting this request. Wait a while (up to an hour) and try again.",
+            _ => $"Steam refused to start moving the authenticator (EResult {r.EResult}). It requires a phone number on the account; " +
+                 "if there is none, remove the old authenticator with its revocation code and add a new one instead.",
+        };
+    }
+
+    /// <summary>
+    /// Finishes the move with the SMS code. On success <see cref="LinkedAccount"/> holds NEW secrets and the old
+    /// authenticator stops working immediately, so save the account right away.
+    /// </summary>
+    public async Task<TransferResult> TransferFinishAsync(string smsCode, CancellationToken ct = default)
+    {
+        var r = await CallWithResult("ITwoFactorService", "RemoveAuthenticatorViaChallengeContinue",
+        [
+            new("sms_code", smsCode.Trim()),
+            new("generate_new_token", "true"),
+            new("version", "2"),
+        ], ct).ConfigureAwait(false);
+
+        JsonElement? token = null;
+        try
+        {
+            using var doc = JsonDocument.Parse(r.Body);
+            if (doc.RootElement.TryGetProperty("response", out var resp) && resp.TryGetProperty("replacement_token", out var t))
+                token = t.Clone();
+        }
+        catch (JsonException) { }
+
+        if (!r.IsOk || token is null)
+        {
+            LastError = $"RemoveAuthenticatorViaChallengeContinue EResult {r.EResult}";
+            // 2 = Fail, 65 = InvalidLoginAuthCode, 88/89 = code mismatch: all mean "that SMS code did not work".
+            return r.EResult is 2 or 65 or 88 or 89 ? TransferResult.BadCode : TransferResult.Failed;
+        }
+
+        var account = token.Value.Deserialize<SteamGuardAccount>(Json.Options)
+                      ?? throw new SteamApiException("Steam returned an empty replacement authenticator.");
+        if (string.IsNullOrEmpty(account.SharedSecret) || string.IsNullOrEmpty(account.IdentitySecret))
+            throw new SteamApiException("Steam's replacement authenticator is missing its secrets.");
+        account.DeviceId = DeviceId;
+        account.Session = session;
+        account.FullyEnrolled = true;
+        LinkedAccount = account;
+        return TransferResult.Success;
+    }
+
     /// <summary>Removes the authenticator. scheme 1 = back to e-mail codes, 2 = no Steam Guard.</summary>
     public static async Task<bool> RemoveAsync(SteamHttp http, SteamGuardAccount account, int scheme, CancellationToken ct = default)
     {
@@ -132,10 +194,12 @@ public sealed class AuthenticatorLinker(SteamHttp http, SteamTime time, SessionD
         return doc.RootElement.TryGetProperty("response", out var r) && r.TryGetProperty("success", out var ok) && ok.GetBoolean();
     }
 
+    private Task<SteamResponse> CallWithResult(string iface, string method, List<KeyValuePair<string, string>> form, CancellationToken ct) =>
+        http.PostFormWithResultAsync(new Uri(SteamEndpoints.ApiMethod(iface, method) + "?access_token=" + Uri.EscapeDataString(session.AccessToken ?? "")), form, ct: ct);
+
     private async Task<JsonElement?> Call(string iface, string method, List<KeyValuePair<string, string>> form, CancellationToken ct)
     {
-        var uri = new Uri(SteamEndpoints.ApiMethod(iface, method) + "?access_token=" + Uri.EscapeDataString(session.AccessToken ?? ""));
-        var body = await http.PostFormAsync(uri, form, ct: ct).ConfigureAwait(false);
+        var body = (await CallWithResult(iface, method, form, ct).ConfigureAwait(false)).Body;
         try
         {
             using var doc = JsonDocument.Parse(body);

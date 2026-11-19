@@ -7,7 +7,7 @@ A cross-platform (Windows and Linux) rewrite of [Steam Desktop Authenticator](ht
 - Trade confirmations work again after Steam's July 2025 Trade Protection change.
 - The core is a library your own programs can use.
 
-Current version: **2.3.0** ([CHANGELOG](docs/project/CHANGELOG.md)).
+Current version: **2.4.0** ([CHANGELOG](docs/project/CHANGELOG.md)).
 
 > Use at your own risk. Whoever holds your maFile and its passphrase controls your Steam account. Keep the passphrase strong and the revocation code written down.
 
@@ -53,6 +53,7 @@ Notes:
   - encrypted with a separate transfer passphrase, or
   - plaintext SDA-compatible JSON, for a one-off import into another tool (delete it afterwards).
 - **Adding a new authenticator** to an account, and removing one.
+- **Moving an existing authenticator** (e.g. from the Steam app) to Arcline with an SMS code. The old one stops working.
 
 ## Security, honestly
 

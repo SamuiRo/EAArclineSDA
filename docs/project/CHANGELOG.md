@@ -11,6 +11,16 @@ Numbering continues the original SDA (last release 1.0.15). 2.0.0 is a major bec
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-11-19
+
+### Added
+- **Move an existing authenticator to Arcline.** If an account already has a mobile authenticator (for example the Steam app), *Add authenticator* (and `arcline-sda link`) now takes it over with an SMS code, the same way the official app's "use this device" does. Steam issues new secrets, the old authenticator stops working, and the new revocation code is shown. This needs a phone number on the account.
+- An error that nothing else caught is now logged to `%APPDATA%\ArclineSDA\logs` (`~/.config/ArclineSDA/logs` on Linux) and shown in a dialog instead of closing the app.
+
+### Fixed
+- **The app closed after entering the e-mail code while adding an account.** Steam drops idle connections while you look for the code, and sending the code then failed with an unhandled `AsyncJobFailedException`. The login now reconnects before sending the code, resends it on a fresh connection if needed, and reports a clear error if it still fails.
+- *Add authenticator* on an account that already has one used to ask for that authenticator's code and then just say "already has an authenticator". Now it explains up front what will happen and lets you cancel or move the authenticator.
+
 ## [2.3.0] - 2026-11-18
 
 ### Added

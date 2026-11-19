@@ -549,8 +549,17 @@ public sealed partial class AccountsViewModel : ObservableObject, IDisposable
         try
         {
             Status = "Logging in...";
-            var session = await Client.Login.LoginAsync(creds.Value.User, creds.Value.Password, new GuiLoginPrompts(_dialogs));
+            var prompts = new GuiLoginPrompts(_dialogs, linkingNewAuthenticator: true);
+            var session = await Client.Login.LoginAsync(creds.Value.User, creds.Value.Password, prompts);
             var linker = Client.CreateLinker(session);
+
+            // Steam asked for a code from another authenticator, so there is one: go straight to moving it here.
+            if (prompts.ExistingAuthenticatorDetected)
+            {
+                await TransferAuthenticatorAsync(linker, creds.Value.User);
+                return;
+            }
+
             Status = "Adding authenticator...";
             while (true)
             {
@@ -570,8 +579,7 @@ public sealed partial class AccountsViewModel : ObservableObject, IDisposable
                         linker.PhoneNumber = null;
                         break;
                     case AuthenticatorLinker.LinkResult.AuthenticatorPresent:
-                        await _dialogs.AlertAsync("Add authenticator", "This account already has an authenticator. Remove it first, or import its maFile instead.");
-                        Status = "";
+                        await TransferAuthenticatorAsync(linker, creds.Value.User);
                         return;
                     default:
                         await _dialogs.AlertAsync("Add authenticator", "Steam refused to add the authenticator. " + linker.LastError);
@@ -608,6 +616,55 @@ public sealed partial class AccountsViewModel : ObservableObject, IDisposable
         }
         catch (OperationCanceledException) { Status = "Cancelled."; }
         catch (SteamGuardException ex) { Status = ""; await _dialogs.AlertAsync("Add authenticator", ex.Message); }
+    }
+
+    /// <summary>
+    /// The account already has a mobile authenticator: move it here with an SMS code (Steam's "use this device" flow).
+    /// New secrets are issued and the old authenticator stops working.
+    /// </summary>
+    private async Task TransferAuthenticatorAsync(AuthenticatorLinker linker, string username)
+    {
+        if (!await _dialogs.ConfirmAsync("Move authenticator to Arcline",
+                "Steam will text a code to the phone number on this account.\n\n" +
+                "After you enter it, Arcline becomes the authenticator and the old one (e.g. the Steam app) STOPS WORKING. " +
+                "Steam may also put a temporary hold on trading and the market for this account.\n\nSend the SMS?",
+                "Send SMS", "Cancel"))
+        {
+            Status = "Cancelled. Nothing was changed on Steam.";
+            return;
+        }
+
+        Status = "Requesting SMS...";
+        var problem = await linker.TransferStartAsync();
+        if (problem is not null)
+        {
+            Status = "";
+            await _dialogs.AlertAsync("Move authenticator", problem);
+            return;
+        }
+
+        for (var attempt = 1; ; attempt++)
+        {
+            var sms = await _dialogs.PromptAsync("Move authenticator",
+                attempt == 1 ? "Enter the code Steam sent by SMS:" : "That code did not work. Enter the SMS code again:");
+            if (string.IsNullOrWhiteSpace(sms)) { Status = "Cancelled. The old authenticator is still active."; return; }
+
+            var r = await linker.TransferFinishAsync(sms);
+            if (r == AuthenticatorLinker.TransferResult.Success) break;
+            if (r == AuthenticatorLinker.TransferResult.BadCode && attempt < 3) continue;
+            Status = "";
+            await _dialogs.AlertAsync("Move authenticator", "Steam did not accept the move. The old authenticator is still active. " + linker.LastError);
+            return;
+        }
+
+        var acc = linker.LinkedAccount!;
+        acc.AccountName ??= username;
+        Vault.Save(acc); // new secrets are already live on Steam: persist them immediately
+        ReloadAccounts(acc.SteamId);
+        Status = $"Authenticator moved to Arcline for {acc.AccountName}.";
+        await _dialogs.AlertAsync("Authenticator moved",
+            "Arcline is now the authenticator for this account; the old one no longer works.\n\n" +
+            "Write down the NEW revocation code. It is the only way to remove the authenticator if you lose this vault:", acc.RevocationCode);
     }
 
     [RelayCommand]

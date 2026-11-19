@@ -210,7 +210,8 @@ async Task Link()
                 linker.PhoneNumber = null;
                 break;
             case AuthenticatorLinker.LinkResult.AuthenticatorPresent:
-                throw new SteamGuardException("This account already has an authenticator. Remove it first (or import its maFile).");
+                await TransferExisting(v, linker, username);
+                return;
             default:
                 throw new SteamGuardException("Steam refused to add the authenticator. " + linker.LastError);
         }
@@ -239,6 +240,29 @@ finalize:
     }
     v.Save(acc);
     Console.Error.WriteLine($"Authenticator linked for {acc.AccountName}.");
+}
+
+async Task TransferExisting(MaFileVault v, AuthenticatorLinker linker, string username)
+{
+    Console.Error.WriteLine("This account already has a mobile authenticator (e.g. the Steam app).");
+    if (!ConsoleIO.Confirm("Move it to Arcline? Steam texts a code to the account's phone; the OLD authenticator then stops working and Steam may hold trades for a while.", a.Flag("yes")))
+        throw new SteamGuardException("Cancelled. If you have its maFile, use 'arcline-sda import <file>' instead.");
+    var problem = await linker.TransferStartAsync(ct);
+    if (problem is not null) throw new SteamGuardException(problem);
+    for (var attempt = 1; ; attempt++)
+    {
+        var sms = ConsoleIO.ReadLine("SMS code: ");
+        if (string.IsNullOrWhiteSpace(sms)) throw new OperationCanceledException();
+        var r = await linker.TransferFinishAsync(sms, ct);
+        if (r == AuthenticatorLinker.TransferResult.Success) break;
+        if (r == AuthenticatorLinker.TransferResult.BadCode && attempt < 3) { Console.Error.WriteLine("That code did not work."); continue; }
+        throw new SteamGuardException("Steam did not accept the move; the old authenticator is still active. " + linker.LastError);
+    }
+    var acc = linker.LinkedAccount!;
+    acc.AccountName ??= username;
+    v.Save(acc);
+    Console.Error.WriteLine($"Authenticator moved to Arcline for {acc.AccountName}.");
+    Console.Error.WriteLine($"NEW REVOCATION CODE: {acc.RevocationCode}   <-- write it down.");
 }
 
 void Import()

@@ -46,10 +46,18 @@ public sealed class SteamHttp : IDisposable
 
     public static SteamHttp Shared { get; } = new();
 
-    public Task<string> GetAsync(Uri uri, SessionData? session = null, CancellationToken ct = default) =>
-        SendAsync(() => Build(HttpMethod.Get, uri, session, null, null), ct);
+    public async Task<string> GetAsync(Uri uri, SessionData? session = null, CancellationToken ct = default) =>
+        (await SendAsync(() => Build(HttpMethod.Get, uri, session, null, null), ct).ConfigureAwait(false)).Body;
 
-    public Task<string> PostFormAsync(Uri uri, IEnumerable<KeyValuePair<string, string>> form, SessionData? session = null,
+    public async Task<string> PostFormAsync(Uri uri, IEnumerable<KeyValuePair<string, string>> form, SessionData? session = null,
+        Uri? referer = null, CancellationToken ct = default) =>
+        (await PostFormWithResultAsync(uri, form, session, referer, ct).ConfigureAwait(false)).Body;
+
+    /// <summary>
+    /// Like <see cref="PostFormAsync"/> but also returns Steam's EResult from the <c>x-eresult</c> header
+    /// (WebAPI service methods report failures there, often with an empty <c>response</c> object).
+    /// </summary>
+    public Task<SteamResponse> PostFormWithResultAsync(Uri uri, IEnumerable<KeyValuePair<string, string>> form, SessionData? session = null,
         Uri? referer = null, CancellationToken ct = default)
     {
         var fields = form.ToList();
@@ -86,7 +94,7 @@ public sealed class SteamHttp : IDisposable
             "Steam_Language=english");
     }
 
-    private async Task<string> SendAsync(Func<HttpRequestMessage> factory, CancellationToken ct)
+    private async Task<SteamResponse> SendAsync(Func<HttpRequestMessage> factory, CancellationToken ct)
     {
         for (var attempt = 1; ; attempt++)
         {
@@ -108,7 +116,8 @@ public sealed class SteamHttp : IDisposable
                 var body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
                 if (!resp.IsSuccessStatusCode)
                     throw new SteamApiException($"Steam returned HTTP {status} for {req.RequestUri?.AbsolutePath}.", status);
-                return body;
+                int? eresult = resp.Headers.TryGetValues("x-eresult", out var values) && int.TryParse(values.FirstOrDefault(), out var er) ? er : null;
+                return new SteamResponse(body, eresult);
             }
             catch (HttpRequestException ex) when (attempt < MaxAttempts)
             {
@@ -143,6 +152,12 @@ public sealed class SteamHttp : IDisposable
     {
         if (_ownsClient) _client.Dispose();
     }
+}
+
+/// <summary>HTTP body plus Steam's EResult header (1 = OK) when present.</summary>
+public sealed record SteamResponse(string Body, int? EResult)
+{
+    public bool IsOk => EResult is null or 1;
 }
 
 internal static class SessionIds
