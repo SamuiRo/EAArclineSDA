@@ -29,6 +29,7 @@ public static class Cleanup
         Try("saved auto-unlock passphrase", () => store.Remove());
 
         if (Directory.Exists(AppPaths.Logs)) Try(AppPaths.Logs, () => Directory.Delete(AppPaths.Logs, recursive: true));
+        if (File.Exists(AppPaths.SettingsFile)) Try(AppPaths.SettingsFile, () => File.Delete(AppPaths.SettingsFile));
 
         foreach (var dir in AppPaths.LegacyExtractionDirs().Where(Directory.Exists))
             Try(dir, () => Directory.Delete(dir, recursive: true));

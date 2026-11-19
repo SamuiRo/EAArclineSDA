@@ -32,9 +32,14 @@ public sealed partial class AccountsViewModel : ObservableObject, IDisposable
     private readonly Autostart _autostart;
     private readonly PassphraseStore _passphraseStore;
 
+    private readonly Action<string>? _switchVault;
+    private readonly Action<MaFileVault>? _onUnlocked;
+
     public AccountsViewModel(MaFileVault vault, Dialogs dialogs, Action lockAction, Action<string> setTitle, SteamGuardClient? client = null,
-        Autostart? autostart = null, PassphraseStore? passphraseStore = null)
+        Autostart? autostart = null, PassphraseStore? passphraseStore = null, Action<string>? switchVault = null, Action<MaFileVault>? onUnlocked = null)
     {
+        _switchVault = switchVault;
+        _onUnlocked = onUnlocked;
         _autostart = autostart ?? new Autostart();
         _passphraseStore = passphraseStore ?? new PassphraseStore();
         Vault = vault;
@@ -871,6 +876,63 @@ public sealed partial class AccountsViewModel : ObservableObject, IDisposable
 
     [RelayCommand]
     private void Lock() => _lock();
+
+    // ------------------------------------------------------------------ vault location (any folder, like KeePassXC)
+
+    [RelayCommand]
+    private async Task OpenOtherVaultAsync()
+    {
+        if (_switchVault is null) return;
+        var dir = await _dialogs.PickFolderAsync("Select a vault folder (it contains vault.json), or an empty folder for a new vault");
+        if (dir is null || AppSettings.SamePath(dir, Vault.Directory)) return;
+        if (!MaFileVault.Exists(dir) &&
+            !await _dialogs.ConfirmAsync("Open vault", $"There is no Arcline vault in:\n{dir}\n\nCreate a new vault there?", "Create here", "Cancel")) return;
+        _switchVault(dir);
+    }
+
+    /// <summary>Moves this vault (still encrypted) to another folder and reopens it there.</summary>
+    [RelayCommand]
+    private async Task MoveVaultAsync()
+    {
+        var target = await _dialogs.PickFolderAsync("Select the new folder for the vault (empty, or a new folder)");
+        if (target is null || AppSettings.SamePath(target, Vault.Directory)) return;
+        if (MaFileVault.Exists(target)) { await _dialogs.AlertAsync("Move vault", "That folder already contains a vault."); return; }
+        var pass = await _dialogs.PromptAsync("Move vault",
+            $"Move the vault\n  from: {Vault.Directory}\n  to:   {target}\n\nThe files stay encrypted. Enter the vault passphrase to confirm:", password: true);
+        if (pass is null) return;
+        if (!await Task.Run(() => Vault.VerifyPassphrase(pass))) { await _dialogs.AlertAsync("Move vault", "Wrong passphrase; nothing was moved."); return; }
+
+        var from = Vault.Directory;
+        var hadAutoUnlock = await Task.Run(() => _passphraseStore.IsSaved(from));
+        Dispose(); // stop timers and lock before files move
+        try
+        {
+            await Task.Run(() => MaFileVault.Move(from, target));
+        }
+        catch (Exception ex) when (ex is SteamGuardException or IOException or UnauthorizedAccessException)
+        {
+            await _dialogs.AlertAsync("Move vault", "The vault was not moved: " + ex.Message);
+            _switchVault?.Invoke(from);
+            return;
+        }
+        if (hadAutoUnlock)
+        {
+            _passphraseStore.Remove(from);
+            try { _passphraseStore.Save(target, pass); } catch (SteamGuardException) { }
+        }
+        var moved = await Task.Run(() => { var v = MaFileVault.Open(target); v.Unlock(pass); return v; });
+        _onUnlocked?.Invoke(moved);
+    }
+
+    [RelayCommand]
+    private void SetTheme(string theme)
+    {
+        var t = Enum.TryParse<AppTheme>(theme, out var parsed) ? parsed : AppTheme.System;
+        var settings = AppSettings.Load();
+        settings.Theme = t;
+        settings.Save();
+        App.ApplyTheme(t);
+    }
 
     [RelayCommand]
     private static void Quit() => (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.Shutdown();

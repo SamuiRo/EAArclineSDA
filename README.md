@@ -7,7 +7,7 @@ A cross-platform (Windows and Linux) rewrite of [Steam Desktop Authenticator](ht
 - Trade confirmations work again after Steam's July 2025 Trade Protection change.
 - The core is a library your own programs can use.
 
-Current version: **2.5.0** ([CHANGELOG](docs/project/CHANGELOG.md)).
+Current version: **2.6.0** ([CHANGELOG](docs/project/CHANGELOG.md)).
 
 > Use at your own risk. Whoever holds your maFile and its passphrase controls your Steam account. Keep the passphrase strong and the revocation code written down.
 
@@ -26,11 +26,12 @@ You don't need to install .NET; the builds are self-contained.
 Notes:
 - **Windows:** SmartScreen may warn about an unsigned app. Choose *More info → Run anyway*.
 - **Linux:** the tray icon needs StatusNotifier/AppIndicator support. GNOME needs the AppIndicator extension; the app works without it.
-- **Where the vault lives:**
-  - `%APPDATA%\ArclineSDA\vault` on Windows;
-  - `~/.config/ArclineSDA/vault` on Linux;
+- **Where the vault lives: anywhere you like**, like a KeePassXC database. On the unlock screen use *Open another vault…* or *New vault in another folder…*, or pick from *Recent vaults*. Once unlocked, *File → Move vault to another folder…* moves it. The last vault opens next time, in the app and in the CLI. Defaults and overrides:
+  - first run: `%APPDATA%\ArclineSDA\vault` on Windows, `~/.config/ArclineSDA/vault` on Linux;
   - a `vault/` folder next to the executable (portable mode);
-  - wherever you point `--vault` or `$ARCLINE_SDA_VAULT`.
+  - `--vault <folder>` or `$ARCLINE_SDA_VAULT` always win.
+
+  A vault is a folder (`vault.json` plus one encrypted file per account). Keeping it in a synced folder works, but don't run the app on two PCs against the same vault at the same time.
 
 **Coming from the old SDA:** *File → Import old SDA folder*, or `arcline-sda import-sda <folder>`. Encrypted SDA folders are supported. The old folder is not modified; delete it once you have checked the codes.
 
@@ -75,7 +76,8 @@ The app folder holds only the program. Outside it, Arcline writes:
 
 | What | Windows | Linux |
 |---|---|---|
-| Vault (your accounts, encrypted) | `%APPDATA%\ArclineSDA\vault` | `~/.config/ArclineSDA/vault` |
+| Vault (your accounts, encrypted) | `%APPDATA%\ArclineSDA\vault`, or the folder you chose | `~/.config/ArclineSDA/vault`, or the folder you chose |
+| Preferences (theme, recent vaults) | `%APPDATA%\ArclineSDA\settings.json` | `~/.config/ArclineSDA/settings.json` |
 | Error logs | `%APPDATA%\ArclineSDA\logs` | `~/.config/ArclineSDA/logs` |
 | Start with OS (if enabled) | `HKCU\…\CurrentVersion\Run\ArclineSDA` | `~/.config/autostart/arcline-sda.desktop` |
 | Auto-unlock (if enabled) | `%APPDATA%\ArclineSDA\autounlock.bin` (DPAPI) | Secret Service keyring entry `application=arcline-sda` |

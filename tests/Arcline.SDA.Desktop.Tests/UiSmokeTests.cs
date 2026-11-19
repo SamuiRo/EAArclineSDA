@@ -4,6 +4,7 @@ using Arcline.SDA.Desktop.Services;
 using Arcline.SDA.Desktop.ViewModels;
 using Arcline.SDA.Desktop.Views;
 using Arcline.SteamGuard.Models;
+using Arcline.SteamGuard.Platform;
 using Arcline.SteamGuard.Storage;
 using Avalonia;
 using Avalonia.Headless;
@@ -61,7 +62,8 @@ public class UiSmokeTests
         Environment.SetEnvironmentVariable("ARCLINE_SDA_VAULT", dir);
         try
         {
-            var vm = new MainWindowViewModel(new Dialogs(() => w));
+            var settings = AppSettings.Load(Path.Combine(Path.GetTempPath(), "arcline-ui-tests", Guid.NewGuid().ToString("N"), "settings.json"));
+            var vm = new MainWindowViewModel(new Dialogs(() => w), settings: settings);
             w.DataContext = vm;
             w.Show();
             var unlock = Assert.IsType<UnlockViewModel>(vm.Current);
@@ -73,6 +75,45 @@ public class UiSmokeTests
             Save(w, "unlock-create.png");
         }
         finally { Environment.SetEnvironmentVariable("ARCLINE_SDA_VAULT", null); }
+    }
+
+    [AvaloniaFact]
+    public void UnlockScreen_ListsRecentVaults_SwitchesVault_AndHonoursDarkTheme()
+    {
+        var w = new MainWindow { Width = 900, Height = 640 };
+        var root = Path.Combine(Path.GetTempPath(), "arcline-ui-tests", Guid.NewGuid().ToString("N"));
+        var usb = Path.Combine(root, "usb-vault");
+        var home = Path.Combine(root, "home-vault");
+        MaFileVault.Create(usb, "ui-test-passphrase", 100_000).Dispose();
+        MaFileVault.Create(home, "ui-test-passphrase", 100_000).Dispose();
+        var settings = AppSettings.Load(Path.Combine(root, "settings.json"));
+        settings.RememberVault(usb);
+        settings.RememberVault(home); // last opened
+
+        Environment.SetEnvironmentVariable("ARCLINE_SDA_VAULT", home);
+        try
+        {
+            App.ApplyTheme(AppTheme.Dark);
+            Assert.Equal(Avalonia.Styling.ThemeVariant.Dark, Application.Current!.RequestedThemeVariant);
+
+            var vm = new MainWindowViewModel(new Dialogs(() => w), tryAutoUnlock: false, settings: settings);
+            w.DataContext = vm;
+            w.Show();
+            var unlock = Assert.IsType<UnlockViewModel>(vm.Current);
+            Assert.True(unlock.IsExisting);
+            var recent = Assert.Single(unlock.RecentVaults); // the current vault is not listed again
+            Assert.True(AppSettings.SamePath(usb, recent));
+            Save(w, "unlock-dark-recent.png");
+
+            unlock.OpenRecentCommand.Execute(usb);
+            var switched = Assert.IsType<UnlockViewModel>(vm.Current);
+            Assert.True(AppSettings.SamePath(usb, switched.VaultDir));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ARCLINE_SDA_VAULT", null);
+            App.ApplyTheme(AppTheme.System);
+        }
     }
 
     [AvaloniaFact]

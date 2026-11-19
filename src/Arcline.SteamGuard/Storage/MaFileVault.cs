@@ -57,7 +57,52 @@ public sealed class MaFileVault : IAccountStateStore, IDisposable
         if (!string.IsNullOrWhiteSpace(env)) return Path.GetFullPath(env);
         var portable = Path.Combine(AppContext.BaseDirectory, "vault");
         if (File.Exists(Path.Combine(portable, IndexFileName))) return portable;
+        // The vault opened last time in the app (vaults can live in any folder).
+        var last = Platform.AppSettings.Load().LastVault;
+        if (!string.IsNullOrEmpty(last) && Exists(last)) return last;
         return Platform.AppPaths.DefaultVault;
+    }
+
+    /// <summary>
+    /// Moves a vault to another folder: copies vault.json, the encrypted maFiles and backups/, checks the copy opens
+    /// with the same content, then deletes only those files from the old folder (other files there are left alone).
+    /// Files stay encrypted the whole time; no passphrase is needed.
+    /// </summary>
+    public static void Move(string fromDir, string toDir)
+    {
+        var from = Path.GetFullPath(fromDir);
+        var to = Path.GetFullPath(toDir);
+        if (Platform.AppSettings.SamePath(from, to)) throw new SteamGuardException("That is already the vault's folder.");
+        if (!Exists(from)) throw new SteamGuardException($"No vault found in '{from}'.");
+        if (Exists(to)) throw new SteamGuardException($"'{to}' already contains a vault.");
+        if (to.StartsWith(from + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new SteamGuardException("The new folder cannot be inside the current vault folder.");
+
+        var source = Open(from);
+        var files = source.Index.Accounts.Select(e => SafeName(e.File)).Where(f => File.Exists(Path.Combine(from, f))).ToList();
+        var backups = Path.Combine(from, "backups");
+        var backupFiles = System.IO.Directory.Exists(backups) ? System.IO.Directory.GetFiles(backups, "*.maFile").Select(Path.GetFileName).ToList() : [];
+
+        SecureFile.EnsureDirectory(to);
+        foreach (var f in files) SecureFile.WriteAllText(Path.Combine(to, f), File.ReadAllText(Path.Combine(from, f)));
+        foreach (var b in backupFiles)
+        {
+            SecureFile.EnsureDirectory(Path.Combine(to, "backups"));
+            SecureFile.WriteAllText(Path.Combine(to, "backups", b!), File.ReadAllText(Path.Combine(backups, b!)));
+        }
+        SecureFile.WriteAllText(Path.Combine(to, IndexFileName), File.ReadAllText(Path.Combine(from, IndexFileName)));
+
+        // Verify before deleting anything.
+        var copy = Open(to);
+        if (copy.Index.Accounts.Count != source.Index.Accounts.Count ||
+            files.Any(f => File.ReadAllText(Path.Combine(from, f)) != File.ReadAllText(Path.Combine(to, f))))
+            throw new SteamGuardException("The copied vault does not match the original; nothing was deleted.");
+
+        foreach (var f in files) File.Delete(Path.Combine(from, f));
+        foreach (var b in backupFiles) File.Delete(Path.Combine(backups, b!));
+        File.Delete(Path.Combine(from, IndexFileName));
+        if (System.IO.Directory.Exists(backups) && !System.IO.Directory.EnumerateFileSystemEntries(backups).Any()) System.IO.Directory.Delete(backups);
+        if (!System.IO.Directory.EnumerateFileSystemEntries(from).Any()) System.IO.Directory.Delete(from);
     }
 
     // ---------- per-account settings ----------

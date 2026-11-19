@@ -22,6 +22,25 @@
               Content="Moving from another PC? Restore from backup..." Command="{Binding RestoreCommand}" />
       <ProgressBar IsIndeterminate="True" IsVisible="{Binding Busy}" />
       <SelectableTextBlock Text="{Binding VaultDir, StringFormat='Vault: {0}'}" FontSize="11" Classes="muted" TextWrapping="Wrap" TextAlignment="Center" />
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8">
+        <Button Content="Open another vault..." Command="{Binding OpenOtherVaultCommand}" FontSize="12" />
+        <Button Content="New vault in another folder..." Command="{Binding CreateVaultElsewhereCommand}" FontSize="12" />
+      </StackPanel>
+      <StackPanel Spacing="2" IsVisible="{Binding HasRecentVaults}">
+        <TextBlock Text="Recent vaults" FontSize="11" Classes="muted" HorizontalAlignment="Center" />
+        <ItemsControl ItemsSource="{Binding RecentVaults}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="x:String">
+              <Button FontSize="11" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                      Background="Transparent" Padding="6,2" ToolTip.Tip="{Binding}"
+                      Command="{Binding $parent[UserControl].((vm:UnlockViewModel)DataContext).OpenRecentCommand, FallbackValue={x:Null}}"
+                      CommandParameter="{Binding}">
+                <TextBlock Text="{Binding}" TextTrimming="LeadingCharacterEllipsis" TextAlignment="Center" />
+              </Button>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
     </StackPanel>
   </Grid>
 </UserControl>

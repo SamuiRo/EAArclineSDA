@@ -11,6 +11,19 @@ Numbering continues the original SDA (last release 1.0.15). 2.0.0 is a major bec
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-11-19
+
+### Added
+- **Vaults in any folder, like KeePassXC databases.**
+  - On the unlock screen, *Open another vault…* opens an existing vault from any folder (a USB stick, a synced folder…), and *New vault in another folder…* creates one there. The same options are in the *File* menu once unlocked.
+  - *Recent vaults* lists vaults you opened before. The last one opens automatically next time, and the CLI uses it too.
+  - *File > Move vault to another folder…* and `arcline-sda move-vault <folder>` move a vault. The files stay encrypted; the copy is verified before the old files are deleted.
+- **Appearance:** *View > Theme* sets System, Light or Dark. The choice is remembered and applies from the unlock screen on.
+- The status bar shows which vault is open.
+
+### Changed
+- App preferences (theme, last and recent vaults; no secrets) are stored in `settings.json` next to the logs. *Remove app data* deletes this file too.
+
 ## [2.5.0] - 2026-11-19
 
 ### Added

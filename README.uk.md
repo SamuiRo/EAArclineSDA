@@ -7,7 +7,7 @@
 - Підтвердження трейдів знову працюють після запуску Steam Trade Protection (липень 2025).
 - Ядро можна підключати у власні програми.
 
-Поточна версія: **2.5.0** ([CHANGELOG](docs/project/CHANGELOG.md)).
+Поточна версія: **2.6.0** ([CHANGELOG](docs/project/CHANGELOG.md)).
 
 > Використовуйте на власний ризик. Хто має ваш maFile і пароль до нього, той контролює акаунт Steam. Обирайте сильний пароль і запишіть код відновлення (revocation code).
 
@@ -26,11 +26,12 @@
 Примітки:
 - **Windows:** SmartScreen може попередити про непідписану програму. Натисніть *Докладніше → Все одно запустити*.
 - **Linux:** для іконки в треї потрібна підтримка StatusNotifier/AppIndicator. У GNOME для цього треба розширення AppIndicator; без нього програма теж працює.
-- **Де лежить сховище:**
-  - `%APPDATA%\ArclineSDA\vault` на Windows;
-  - `~/.config/ArclineSDA/vault` на Linux;
+- **Де лежить сховище: де завгодно**, як база KeePassXC. На екрані розблокування є *Open another vault…*, *New vault in another folder…* і список *Recent vaults*. Після розблокування сховище можна перемістити через *File → Move vault to another folder…*. Наступного разу відкривається останнє сховище, і в програмі, і в CLI. За замовчуванням і для перевизначення:
+  - перший запуск: `%APPDATA%\ArclineSDA\vault` на Windows, `~/.config/ArclineSDA/vault` на Linux;
   - папка `vault/` поруч із програмою (portable-режим);
-  - будь-яке місце, задане через `--vault` або `$ARCLINE_SDA_VAULT`.
+  - `--vault <папка>` або `$ARCLINE_SDA_VAULT` мають пріоритет над усім.
+
+  Сховище — це папка (`vault.json` і по одному зашифрованому файлу на акаунт). Тримати її в синхронізованій теці можна, але не запускайте програму на двох ПК з одним сховищем одночасно.
 
 **Перехід зі старого SDA:** *File → Import old SDA folder* або `arcline-sda import-sda <папка>`. Зашифровані папки SDA теж підтримуються. Стару папку програма не змінює; видаліть її, коли переконаєтеся, що коди збігаються.
 
@@ -75,7 +76,8 @@
 
 | Що | Windows | Linux |
 |---|---|---|
-| Сховище (ваші акаунти, зашифровані) | `%APPDATA%\ArclineSDA\vault` | `~/.config/ArclineSDA/vault` |
+| Сховище (ваші акаунти, зашифровані) | `%APPDATA%\ArclineSDA\vault` або обрана вами папка | `~/.config/ArclineSDA/vault` або обрана вами папка |
+| Налаштування (тема, недавні сховища) | `%APPDATA%\ArclineSDA\settings.json` | `~/.config/ArclineSDA/settings.json` |
 | Логи помилок | `%APPDATA%\ArclineSDA\logs` | `~/.config/ArclineSDA/logs` |
 | Автозапуск (якщо ввімкнено) | `HKCU\…\CurrentVersion\Run\ArclineSDA` | `~/.config/autostart/arcline-sda.desktop` |
 | Авторозблокування (якщо ввімкнено) | `%APPDATA%\ArclineSDA\autounlock.bin` (DPAPI) | запис у keyring `application=arcline-sda` |

@@ -59,6 +59,7 @@ try
         case "deactivate": await Deactivate(); break;
         case "where": Console.WriteLine(vaultDir); break;
         case "cleanup": CleanupCmd(); break;
+        case "move-vault": MoveVaultCmd(); break;
         default: throw new UsageException($"Unknown command '{cmd}'.");
     }
     return 0;
@@ -100,6 +101,7 @@ void Init()
     if (MaFileVault.Exists(vaultDir)) throw new SteamGuardException($"Vault already exists in '{vaultDir}'.");
     var pass = ConsoleIO.NewSecret(a, "passphrase-file", PassEnv, "vault passphrase");
     using var v = MaFileVault.Create(vaultDir, pass);
+    Arcline.SteamGuard.Platform.AppSettings.Load().RememberVault(v.Directory);
     Console.Error.WriteLine($"Vault created in {v.Directory}. All maFiles stored here are encrypted (AES-256-GCM).");
 }
 
@@ -373,6 +375,17 @@ void ImportVault()
     if (res.Errors.Count > 0) Environment.ExitCode = 1;
 }
 
+void MoveVaultCmd()
+{
+    var target = Path.GetFullPath(a.Pos(0, "new vault folder"));
+    if (!ConsoleIO.Confirm($"Move the vault (still encrypted)\n  from {vaultDir}\n  to   {target}?", a.Flag("yes"))) return;
+    MaFileVault.Move(vaultDir, target);
+    var settings = Arcline.SteamGuard.Platform.AppSettings.Load();
+    settings.ForgetVault(vaultDir);
+    settings.RememberVault(target);
+    Console.Error.WriteLine($"Vault moved to {target}. The app and the CLI will open it from there.");
+}
+
 void CleanupCmd()
 {
     var includeVault = a.Flag("include-vault");
@@ -426,7 +439,8 @@ Vault
   init                         Create an encrypted vault
   list                         List accounts (no passphrase needed)
   passwd                       Change the vault passphrase (re-encrypts every file)
-  where                        Print the vault directory
+  where                        Print the vault directory (any folder works; --vault picks one)
+  move-vault <folder>          Move the vault (still encrypted) to another folder
   cleanup [--include-vault]    Remove app data outside the app folder (autostart, saved passphrase, logs)
 
 Codes and confirmations

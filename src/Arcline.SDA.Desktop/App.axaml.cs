@@ -12,7 +12,23 @@ public sealed partial class App : Application
 {
     private MainWindow? _window;
 
-    public override void Initialize() => AvaloniaXamlLoader.Load(this);
+    public override void Initialize()
+    {
+        AvaloniaXamlLoader.Load(this);
+        ApplyTheme(SteamGuard.Platform.AppSettings.Load().Theme);
+    }
+
+    /// <summary>System follows the OS light/dark setting; Light and Dark force it.</summary>
+    public static void ApplyTheme(SteamGuard.Platform.AppTheme theme)
+    {
+        if (Current is null) return;
+        Current.RequestedThemeVariant = theme switch
+        {
+            SteamGuard.Platform.AppTheme.Light => Avalonia.Styling.ThemeVariant.Light,
+            SteamGuard.Platform.AppTheme.Dark => Avalonia.Styling.ThemeVariant.Dark,
+            _ => Avalonia.Styling.ThemeVariant.Default,
+        };
+    }
 
     public override void OnFrameworkInitializationCompleted()
     {

@@ -13,6 +13,9 @@ public static class AppPaths
     public static string DefaultVault => Path.Combine(Root, "vault");
     public static string Logs => Path.Combine(Root, "logs");
 
+    /// <summary>App preferences: theme, last opened vault, recent vaults (no secrets).</summary>
+    public static string SettingsFile => Path.Combine(Root, "settings.json");
+
     /// <summary>Windows only: DPAPI-protected passphrase for "unlock automatically on this PC".</summary>
     public static string AutoUnlockFile => Path.Combine(Root, "autounlock.bin");
 

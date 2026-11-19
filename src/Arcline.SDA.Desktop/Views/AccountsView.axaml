@@ -16,12 +16,22 @@
         <MenuItem Header="Import from another _vault / backup..." Command="{Binding ImportVaultCommand}" />
         <MenuItem Header="_Back up vault (for another PC)..." Command="{Binding BackupVaultCommand}" />
         <Separator />
+        <MenuItem Header="_Open another vault..." Command="{Binding OpenOtherVaultCommand}" />
+        <MenuItem Header="_Move vault to another folder..." Command="{Binding MoveVaultCommand}" />
+        <Separator />
         <MenuItem Header="_Settings..." Command="{Binding SettingsCommand}" />
         <MenuItem Header="_Change vault passphrase..." Command="{Binding ChangePassphraseCommand}" />
         <MenuItem Header="_Lock" Command="{Binding LockCommand}" InputGesture="Ctrl+L" />
         <Separator />
         <MenuItem Header="Remove app data from this PC..." Command="{Binding RemoveAppDataCommand}" />
         <MenuItem Header="_Quit" Command="{Binding QuitCommand}" />
+      </MenuItem>
+      <MenuItem Header="_View">
+        <MenuItem Header="_Theme">
+          <MenuItem Header="_System" Command="{Binding SetThemeCommand}" CommandParameter="System" />
+          <MenuItem Header="_Light" Command="{Binding SetThemeCommand}" CommandParameter="Light" />
+          <MenuItem Header="_Dark" Command="{Binding SetThemeCommand}" CommandParameter="Dark" />
+        </MenuItem>
       </MenuItem>
       <MenuItem Header="_Account" IsEnabled="{Binding HasSelection}">
         <MenuItem Header="Auto-_confirm..." Command="{Binding EditAutoConfirmCommand}" />
@@ -39,9 +49,11 @@
     </Menu>
 
     <Border DockPanel.Dock="Bottom" Padding="10,4" Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}">
-      <Grid ColumnDefinitions="*,Auto">
+      <Grid ColumnDefinitions="*,Auto,Auto">
         <TextBlock Text="{Binding Status}" TextTrimming="CharacterEllipsis" FontSize="12" />
-        <TextBlock Grid.Column="1" Text="time not synced" FontSize="12" Foreground="Orange" IsVisible="{Binding !TimeSynced}" />
+        <TextBlock Grid.Column="1" Text="time not synced" FontSize="12" Foreground="Orange" Margin="8,0,0,0" IsVisible="{Binding !TimeSynced}" />
+        <TextBlock Grid.Column="2" Text="{Binding VaultPath}" FontSize="11" Classes="muted" Margin="12,0,0,0" MaxWidth="320"
+                   TextTrimming="LeadingCharacterEllipsis" ToolTip.Tip="{Binding VaultPath, StringFormat='Vault: {0}'}" VerticalAlignment="Center" />
       </Grid>
     </Border>
 
